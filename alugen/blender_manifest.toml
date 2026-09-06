@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "alugen"
+version = "1.0.0"
+name = "AluGen"
+tagline = "Parametric aluminium extrusion profiles, joints and parts list"
+maintainer = "Marvin Krullmann <marvin@krullmensch.de>"
+type = "add-on"
+
+website = "https://github.com/krullmensch/AluGen"
+tags = ["Add Mesh", "Object", "Modeling"]
+
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
