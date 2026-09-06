@@ -7,7 +7,7 @@ joins them, places hardware and produces a parts list you can order from.
 bl_info = {
     "name": "AluGen",
     "author": "Marvin Krullmann",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar (N) > AluGen",
     "description": "Parametric aluminium extrusion profiles, joints and parts list",

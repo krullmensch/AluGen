@@ -92,6 +92,7 @@ class ALUGEN_PT_parts(_Base, bpy.types.Panel):
         lay = self.layout
         lay.operator("alugen.add_caps", icon='MESH_PLANE')
         lay.operator("alugen.add_bracket", icon='MOD_BEVEL')
+        lay.operator("alugen.add_bracket_on_profile", icon='EMPTY_AXIS')
         lay.operator("alugen.add_tnut", icon='MESH_CUBE')
         lay.operator("alugen.add_connector", icon='LINKED')
 

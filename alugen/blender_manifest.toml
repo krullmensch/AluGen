@@ -1,7 +1,7 @@
-schema_version = "1.0.0"
+schema_version = "1.1.0"
 
 id = "alugen"
-version = "1.0.0"
+version = "1.1.0"
 name = "AluGen"
 tagline = "Parametric aluminium extrusion profiles, joints and parts list"
 maintainer = "Marvin Krullmann <marvin@krullmensch.de>"

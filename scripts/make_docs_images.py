@@ -56,7 +56,7 @@ def render(name, ortho, loc, rot, res, flat=False):
             o.color = (0.09, 0.09, 0.10, 1)
         elif o.alugen.kind in {'TNUT', 'SCREW', 'CONNECTOR'}:
             o.color = (0.25, 0.45, 0.85, 1)
-        else:
+        elif o.alugen.is_part:
             o.color = (0.72, 0.73, 0.75, 1)
     bpy.ops.render.render(write_still=True)
     bpy.data.objects.remove(cam, do_unlink=True)
@@ -95,4 +95,35 @@ bpy.ops.alugen.add_tnut(face='X-', offset=200.0)
 bpy.ops.alugen.add_connector(kind='BUTT', offset=250.0, face='X-')
 render("joint-detail.png", 0.30, (0.55, -0.55, 0.62),
        (math.radians(58), 0, math.radians(45)), (1200, 900))
+
+# 4) brackets placed freely on posts, carrying a panel
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+X, Y, Z, A = 400.0, 300.0, 400.0, 40.0
+s.frame_x, s.frame_y, s.frame_z = X, Y, Z
+s.frame_levels, s.frame_top, s.frame_bottom = 0, False, True
+bpy.ops.alugen.build_frame()
+
+panel_t = 18.0
+corner_z = Z - panel_t
+posts = [o for o in C.scene.objects
+         if o.alugen.kind == 'PROFILE' and abs(o.alugen.length - Z) < 1e-6]
+for post in posts:
+    for o in C.selected_objects:
+        o.select_set(False)
+    post.select_set(True)
+    C.view_layer.objects.active = post
+    inward = 180.0 if post.matrix_world.translation.x > 0 else 0.0
+    bpy.ops.alugen.add_bracket_on_profile(offset=corner_z, rotation=inward,
+                                          leg_direction='ALONG_MINUS')
+
+bpy.ops.mesh.primitive_cube_add(size=2.0)
+panel = C.active_object
+panel.name = "Panel (not an AluGen part)"
+panel.scale = ((X * 0.5 - A) * MM, (Y * 0.5 - A) * MM, panel_t * 0.5 * MM)
+panel.location = (0.0, 0.0, (corner_z + panel_t * 0.5) * MM)
+panel.color = (0.55, 0.36, 0.18, 1.0)
+render("free-brackets.png", 0.95, (0.75, -0.85, 0.72),
+       (math.radians(66), 0, math.radians(41)), (1200, 900))
+
 print("IMAGES DONE")

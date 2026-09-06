@@ -168,6 +168,88 @@ _, rs = builder.profile_span(rail)
 check(r == {'FINISHED'} and (st2 - rs).length < 1e-6,
       "snap_end meets the end face (deviation %.6f mm)" % ((st2 - rs).length / MM))
 
+def aabb_early(o):
+    lo = Vector((1e9,) * 3)
+    hi = Vector((-1e9,) * 3)
+    for c in o.bound_box:
+        w = o.matrix_world @ Vector(c)
+        for i in range(3):
+            lo[i] = min(lo[i], w[i])
+            hi[i] = max(hi[i], w[i])
+    return lo, hi
+
+
+def overlap_early(A, B, tol=1e-5):
+    v = 1.0
+    for i in range(3):
+        d = min(A[1][i], B[1][i]) - max(A[0][i], B[0][i]) - tol
+        if d <= 0:
+            return 0.0
+        v *= d
+    return v
+
+
+def gap_early(A, B):
+    return max(max(B[0][i] - A[1][i], A[0][i] - B[1][i]) for i in range(3))
+
+
+print("\n=== Bracket on a single profile ===")
+for o in list(C.scene.objects):
+    bpy.data.objects.remove(o, do_unlink=True)
+s.a, s.b, s.slot, s.length, s.axis = '40', '40', 'N8', 600.0, 'Z'
+s.at_cursor = False
+bpy.ops.alugen.add_profile()
+solo = C.active_object
+
+cases = [(0.0, 'ALONG_PLUS', Vector((0.020, 0.0, 0.100))),
+         (90.0, 'ALONG_PLUS', Vector((0.0, 0.020, 0.100))),
+         (180.0, 'ALONG_MINUS', Vector((-0.020, 0.0, 0.100))),
+         (270.0, 'ACROSS_PLUS', Vector((0.0, -0.020, 0.100)))]
+for rot, leg, expect in cases:
+    r = bpy.ops.alugen.add_bracket_on_profile(offset=100.0, rotation=rot, leg_direction=leg)
+    obj = [o for o in C.scene.objects if o.alugen.kind == 'BRACKET'][-1]
+    d = (obj.matrix_world.translation - expect).length
+    check(r == {'FINISHED'} and d < 1e-6,
+          "free bracket at %.0f deg (%s): corner off by %.6f mm" % (rot, leg, d / MM))
+
+check(C.active_object is solo, "the profile stays active after placing a bracket")
+r = bpy.ops.alugen.add_bracket_on_profile(offset=250.0, rotation=45.0, snap_faces=False)
+free = [o for o in C.scene.objects if o.alugen.kind == 'BRACKET'][-1]
+_r = geometry.resolve_spec(40, 40, 'N8')['corner_r']
+_d45 = ((20 - _r) * 2 ** -0.5 * 2 + _r) * MM
+expect45 = Vector((_d45 * 2 ** -0.5, _d45 * 2 ** -0.5, 0.25))
+check(r == {'FINISHED'} and (free.matrix_world.translation - expect45).length < 1e-6,
+      "free bracket at 45 deg sits on the profile corner")
+check(free.parent is solo, "free bracket is parented to the profile")
+check(free.alugen.part_id == 'BRACKET-N8-40', "free bracket part id: %s" % free.alugen.part_id)
+
+free_brs = [o for o in C.scene.objects if o.alugen.kind == 'BRACKET']
+
+
+def rounded_box_sdf(x, y, ha, hb, r):
+    qx, qy = abs(x) - (ha - r), abs(y) - (hb - r)
+    outside = (max(qx, 0.0) ** 2 + max(qy, 0.0) ** 2) ** 0.5
+    return outside + min(max(qx, qy), 0.0) - r
+
+
+inv = solo.matrix_world.inverted()
+worst = 1e9
+for o in free_brs:
+    for v in o.data.vertices:
+        p = inv @ (o.matrix_world @ v.co)
+        worst = min(worst, rounded_box_sdf(p.x / MM, p.y / MM, 20.0, 20.0, _r))
+check(len(free_brs) == 5, "5 free brackets placed")
+check(worst > -1e-4, "no free bracket vertex sits inside the profile hull "
+                     "(closest %.4f mm)" % worst)
+check(abs(worst) < 1e-4, "brackets sit flush on the surface (gap %.4f mm)" % worst)
+
+_pl, _pa = bom.collect(C)
+check(any(r['part_id'] == 'BRACKET-N8-40' and r['qty'] == 5 for r in _pa),
+      "parts list counts the 5 free brackets")
+
+r = bpy.ops.alugen.add_bracket_on_profile(offset=900.0)
+check(r == {'FINISHED'}, "offset beyond the profile length still runs and warns")
+
 print("\n=== Frame ===")
 for o in list(C.scene.objects):
     bpy.data.objects.remove(o, do_unlink=True)
@@ -198,31 +280,7 @@ check(sorted(set(round(o.alugen.length, 2) for o in profs)) == [520.0, 720.0, 90
       "cut lengths: %s" % sorted(set(round(o.alugen.length, 2) for o in profs)))
 
 
-def aabb(o):
-    lo = Vector((1e9,) * 3)
-    hi = Vector((-1e9,) * 3)
-    for c in o.bound_box:
-        w = o.matrix_world @ Vector(c)
-        for i in range(3):
-            lo[i] = min(lo[i], w[i])
-            hi[i] = max(hi[i], w[i])
-    return lo, hi
-
-
-def overlap(A, B, tol=1e-5):
-    v = 1.0
-    for i in range(3):
-        d = min(A[1][i], B[1][i]) - max(A[0][i], B[0][i]) - tol
-        if d <= 0:
-            return 0.0
-        v *= d
-    return v
-
-
-def gap(A, B):
-    return max(max(B[0][i] - A[1][i], A[0][i] - B[1][i]) for i in range(3))
-
-
+aabb, overlap, gap = aabb_early, overlap_early, gap_early
 boxes = {o.name: aabb(o) for o in profs + brs}
 pen = sum(1 for b in brs if any(overlap(boxes[b.name], boxes[p.name]) > 1e-12 for p in profs))
 loose = sum(1 for b in brs

@@ -389,6 +389,95 @@ class ALUGEN_OT_add_bracket(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class ALUGEN_OT_add_bracket_on_profile(bpy.types.Operator):
+    bl_idname = "alugen.add_bracket_on_profile"
+    bl_label = "Add bracket on profile"
+    bl_description = ("Mount an angle bracket anywhere on a single profile, free to "
+                      "position along the length and to rotate around the profile axis. "
+                      "Use it for panels, plates, feet or any part that is not another profile")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    offset: FloatProperty(name="Offset from start (mm)", default=100.0, precision=1,
+                          description="Position of the bracket corner along the profile")
+    rotation: FloatProperty(name="Rotation (deg)", default=0.0, min=-360.0, max=360.0,
+                            description="Rotation around the profile axis; 0 is the local +X face")
+    snap_faces: BoolProperty(name="Snap to faces", default=True,
+                             description="Snap the rotation to the four profile faces")
+    lateral: FloatProperty(name="Lateral offset (mm)", default=0.0, precision=1,
+                           description="Shift across the face, for example to reach the "
+                                       "second slot of a multi-cell profile")
+    leg_direction: EnumProperty(
+        name="Free leg", default='ALONG_PLUS',
+        items=[('ALONG_PLUS', "Along axis, towards end",
+                "Mounted leg runs towards the profile end, the mating part sits on the "
+                "start side of the bracket"),
+               ('ALONG_MINUS', "Along axis, towards start",
+                "Mounted leg runs towards the profile start, the mating part sits on the "
+                "end side of the bracket"),
+               ('ACROSS_PLUS', "Across face, positive",
+                "Mounted leg runs across the face; the screw lands in a slot only on "
+                "multi-cell profiles"),
+               ('ACROSS_MINUS', "Across face, negative",
+                "Mounted leg runs across the face in the opposite direction")])
+    grid: EnumProperty(
+        name="Bracket size", default='AUTO',
+        items=[('AUTO', "Automatic", "Use the profile grid"), ('20', "20", ""),
+               ('30', "30", ""), ('40', "40", ""), ('80', "80", "")])
+    parent_to_profile: BoolProperty(
+        name="Parent to profile", default=True,
+        description="Move the bracket together with the profile")
+
+    @classmethod
+    def poll(cls, context):
+        return is_profile(context.active_object)
+
+    def execute(self, context):
+        prof = context.active_object
+        a, b, length = builder.profile_dims(prof)
+        slot = prof.alugen.slot
+
+        ang = math.radians(self.rotation)
+        if self.snap_faces:
+            ang = math.radians(round(self.rotation / 90.0) * 90.0)
+        n_local = Vector((math.cos(ang), math.sin(ang), 0.0))
+        t_local = Vector((-math.sin(ang), math.cos(ang), 0.0))
+
+        # Distance from the profile axis to the outer surface along n_local.
+        # Support function of the rounded rectangle, so the bracket also sits
+        # tangent to the rounded corners at free angles.
+        r_corner = geometry.resolve_spec(a, b, slot)['corner_r']
+        surf = ((a * 0.5 - r_corner) * abs(n_local.x)
+                + (b * 0.5 - r_corner) * abs(n_local.y) + r_corner)
+
+        z_local = local_start_z(prof) / MM + self.offset
+        if self.offset < -1e-6 or self.offset > length + 1e-6:
+            self.report({'WARNING'}, "Offset %.1f mm is outside the profile length %.1f mm"
+                        % (self.offset, length))
+        p_local = n_local * surf + t_local * self.lateral + Vector((0.0, 0.0, z_local))
+        corner = prof.matrix_world @ Vector((p_local.x * MM, p_local.y * MM, p_local.z * MM))
+
+        mw3 = prof.matrix_world.to_3x3()
+        n_a = (mw3 @ n_local).normalized()
+        axis = builder.profile_axis_world(prof)
+        tangent = (mw3 @ t_local).normalized()
+        n_b = {'ALONG_PLUS': axis, 'ALONG_MINUS': -axis,
+               'ACROSS_PLUS': tangent, 'ACROSS_MINUS': -tangent}[self.leg_direction]
+
+        grid = min(a, b) if self.grid == 'AUTO' else float(self.grid)
+        obj = builder.add_bracket(context, grid, slot, corner, n_a, n_b)
+        if self.parent_to_profile:
+            mat = obj.matrix_world.copy()
+            obj.parent = prof
+            obj.matrix_parent_inverse = prof.matrix_world.inverted()
+            obj.matrix_world = mat
+        # The profile stays active so several brackets can be placed in a row
+        # and the redo panel keeps working.
+        obj.select_set(True)
+        self.report({'INFO'}, "Bracket %g at %.1f mm, %.0f deg" %
+                    (grid, self.offset, math.degrees(ang) % 360.0))
+        return {'FINISHED'}
+
+
 class ALUGEN_OT_add_tnut(bpy.types.Operator):
     bl_idname = "alugen.add_tnut"
     bl_label = "Add T-slot nut"
@@ -513,6 +602,7 @@ CLASSES = (
     ALUGEN_OT_fit_length,
     ALUGEN_OT_add_caps,
     ALUGEN_OT_add_bracket,
+    ALUGEN_OT_add_bracket_on_profile,
     ALUGEN_OT_add_tnut,
     ALUGEN_OT_add_connector,
     ALUGEN_OT_check,

@@ -24,6 +24,10 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
 - **Hardware**: end caps, angle bracket sets, T-slot nuts, slot bar connectors,
   butt joint connectors and cube corner connectors, each placed flush against
   the profile it belongs to.
+- **Brackets without a second profile**: mount an angle bracket anywhere on a
+  single profile, free to slide along its length and to rotate around its axis,
+  for panels, plates, feet, rails or anything else that is not another
+  extrusion. It still lands in the parts list.
 - **Frame generator**: enter outer width, depth and height, get four posts,
   the rails, the brackets and the caps with the correct cut lengths.
 - **Parts list**: live in the sidebar, exportable as CSV and TXT, grouped by
@@ -37,7 +41,7 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
 
 ## Installation
 
-1. Download `alugen-1.0.0.zip` from the releases page, or build it yourself
+1. Download `alugen-1.1.0.zip` from the releases page, or build it yourself
    with `./scripts/build_zip.sh`.
 2. In Blender open `Preferences > Add-ons`, use the dropdown in the top right
    and choose `Install from Disk...`, then pick the zip.
@@ -61,7 +65,8 @@ or `~/.config/blender/5.2/extensions/user_default/` on Linux. Then use
 3. Select two profiles. The one you click last is active and is the one that
    moves. Press `Butt against end`, `Perpendicular on face` or
    `Parallel to face`.
-4. Press `Add bracket at joint` to place an angle bracket in the corner, and
+4. Press `Add bracket at joint` to place an angle bracket in the corner, or
+   `Add bracket on profile` to put one anywhere on a single profile. Press
    `Add end caps` for the open ends.
 5. Open the `Parts list` panel and press `Export parts list`.
 
@@ -80,6 +85,31 @@ every run.
 
 ![Joint detail](docs/images/joint-detail.png)
 
+## Brackets that carry something other than a profile
+
+`Add bracket on profile` mounts a bracket on the active profile alone, so you
+can model the hardware for a table top, a side panel, a foot plate or a sensor
+mount and still get it counted.
+
+- **Offset from start** slides the bracket along the profile.
+- **Rotation** turns it around the profile axis. It snaps to the four faces by
+  default; switch **Snap to faces** off for a free angle, in which case the
+  bracket sits tangent to the rounded corner.
+- **Lateral offset** shifts it across the face, for example onto the second
+  slot of a 40x80.
+- **Free leg** picks which way the mounted leg runs and therefore which side
+  the mating part sits on.
+- **Bracket size** defaults to the profile grid and can be overridden.
+
+The bracket is parented to the profile, so it travels with it, and the profile
+stays active so you can place several in a row and tune the last one in the
+redo panel.
+
+![Panel carried by freely placed brackets](docs/images/free-brackets.png)
+
+*Four brackets placed on the posts at 382 mm carry an 18 mm panel flush with
+the post tops. The panel itself is not an AluGen part.*
+
 ## Panels
 
 | Panel | What it does |
@@ -87,7 +117,7 @@ every run.
 | Add profile | Scene setup, new profile, copies in a row |
 | Edit selection | Change the dimensions of the selected profile, mesh rebuilds live |
 | Join | Butt against end, perpendicular on face, parallel to face, fit length between |
-| Hardware | End caps, angle brackets, T-slot nuts, connectors |
+| Hardware | End caps, angle brackets at a joint or anywhere on a single profile, T-slot nuts, connectors |
 | Frame generator | Full cuboid frame with a cut list preview |
 | Parts list | Live list, CSV and TXT export, clipboard, text block, validation |
 
