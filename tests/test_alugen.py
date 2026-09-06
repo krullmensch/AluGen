@@ -4,12 +4,13 @@ Run with:
     blender --background --factory-startup --python tests/test_alugen.py
 """
 
+import math
 import os
 import sys
 
 import bpy
 import bmesh
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -201,16 +202,17 @@ s.at_cursor = False
 bpy.ops.alugen.add_profile()
 solo = C.active_object
 
-cases = [(0.0, 'ALONG_PLUS', Vector((0.020, 0.0, 0.100))),
-         (90.0, 'ALONG_PLUS', Vector((0.0, 0.020, 0.100))),
-         (180.0, 'ALONG_MINUS', Vector((-0.020, 0.0, 0.100))),
-         (270.0, 'ACROSS_PLUS', Vector((0.0, -0.020, 0.100)))]
-for rot, leg, expect in cases:
-    r = bpy.ops.alugen.add_bracket_on_profile(offset=100.0, rotation=rot, leg_direction=leg)
+cases = [(0.0, 0.0, Vector((0.020, 0.0, 0.100))),
+         (90.0, 0.0, Vector((0.0, 0.020, 0.100))),
+         (180.0, 180.0, Vector((-0.020, 0.0, 0.100))),
+         (270.0, 90.0, Vector((0.0, -0.020, 0.100)))]
+for rot, spin, expect in cases:
+    r = bpy.ops.alugen.add_bracket_on_profile(offset=100.0, rotation=rot, spin=spin)
     obj = [o for o in C.scene.objects if o.alugen.kind == 'BRACKET'][-1]
     d = (obj.matrix_world.translation - expect).length
     check(r == {'FINISHED'} and d < 1e-6,
-          "free bracket at %.0f deg (%s): corner off by %.6f mm" % (rot, leg, d / MM))
+          "free bracket at face %.0f deg, spin %.0f deg: corner off by %.6f mm"
+          % (rot, spin, d / MM))
 
 check(C.active_object is solo, "the profile stays active after placing a bracket")
 r = bpy.ops.alugen.add_bracket_on_profile(offset=250.0, rotation=45.0, snap_faces=False)
@@ -222,6 +224,35 @@ check(r == {'FINISHED'} and (free.matrix_world.translation - expect45).length < 
       "free bracket at 45 deg sits on the profile corner")
 check(free.parent is solo, "free bracket is parented to the profile")
 check(free.alugen.part_id == 'BRACKET-N8-40', "free bracket part id: %s" % free.alugen.part_id)
+
+r = bpy.ops.alugen.add_bracket_on_profile(offset=900.0)
+check(r == {'FINISHED'}, "offset beyond the profile length still runs and warns")
+
+# Spin turns the bracket in place: the corner stays, the mounted leg turns.
+n_face = Vector((1.0, 0.0, 0.0))
+axis_w = Vector((0.0, 0.0, 1.0))
+corner_expect = Vector((0.020, 0.0, 0.300))
+for spin in (0.0, 90.0, 180.0, 270.0, 37.5):
+    snap = abs(spin % 90.0) < 1e-9
+    r = bpy.ops.alugen.add_bracket_on_profile(offset=300.0, rotation=0.0, spin=spin,
+                                              snap_spin=snap)
+    obj = [o for o in C.scene.objects if o.alugen.kind == 'BRACKET'][-1]
+    leg = (obj.matrix_world.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized()
+    want = (Matrix.Rotation(math.radians(spin), 4, n_face).to_3x3() @ axis_w).normalized()
+    mount = (obj.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+    check(r == {'FINISHED'} and (leg - want).length < 1e-6,
+          "spin %.1f deg turns the mounted leg (off by %.6f)" % (spin, (leg - want).length))
+    check((obj.matrix_world.translation - corner_expect).length < 1e-6,
+          "spin %.1f deg leaves the corner in place" % spin)
+    check((mount - n_face).length < 1e-6,
+          "spin %.1f deg keeps the bracket flat on the face" % spin)
+
+r = bpy.ops.alugen.add_bracket_on_profile(offset=300.0, rotation=0.0, spin=44.0,
+                                          snap_spin=True)
+obj = [o for o in C.scene.objects if o.alugen.kind == 'BRACKET'][-1]
+leg = (obj.matrix_world.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized()
+check((leg - axis_w).length < 1e-6, "snap_spin rounds 44 deg down to 0 deg")
+bpy.data.objects.remove(obj, do_unlink=True)
 
 free_brs = [o for o in C.scene.objects if o.alugen.kind == 'BRACKET']
 
@@ -238,17 +269,15 @@ for o in free_brs:
     for v in o.data.vertices:
         p = inv @ (o.matrix_world @ v.co)
         worst = min(worst, rounded_box_sdf(p.x / MM, p.y / MM, 20.0, 20.0, _r))
-check(len(free_brs) == 5, "5 free brackets placed")
+check(len(free_brs) == 11, "11 free brackets placed (%d)" % len(free_brs))
 check(worst > -1e-4, "no free bracket vertex sits inside the profile hull "
                      "(closest %.4f mm)" % worst)
 check(abs(worst) < 1e-4, "brackets sit flush on the surface (gap %.4f mm)" % worst)
 
 _pl, _pa = bom.collect(C)
-check(any(r['part_id'] == 'BRACKET-N8-40' and r['qty'] == 5 for r in _pa),
-      "parts list counts the 5 free brackets")
+check(any(r["part_id"] == "BRACKET-N8-40" and r["qty"] == 11 for r in _pa),
+            "parts list counts all 11 free brackets")
 
-r = bpy.ops.alugen.add_bracket_on_profile(offset=900.0)
-check(r == {'FINISHED'}, "offset beyond the profile length still runs and warns")
 
 print("\n=== Frame ===")
 for o in list(C.scene.objects):

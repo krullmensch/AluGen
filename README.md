@@ -41,7 +41,7 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
 
 ## Installation
 
-1. Download `alugen-1.1.0.zip` from the releases page, or build it yourself
+1. Download `alugen-1.2.0.zip` from the releases page, or build it yourself
    with `./scripts/build_zip.sh`.
 2. In Blender open `Preferences > Add-ons`, use the dropdown in the top right
    and choose `Install from Disk...`, then pick the zip.
@@ -92,14 +92,23 @@ can model the hardware for a table top, a side panel, a foot plate or a sensor
 mount and still get it counted.
 
 - **Offset from start** slides the bracket along the profile.
-- **Rotation** turns it around the profile axis. It snaps to the four faces by
-  default; switch **Snap to faces** off for a free angle, in which case the
-  bracket sits tangent to the rounded corner.
+- **Around profile** turns the mounting position around the profile axis. It
+  snaps to the four faces by default; switch **Snap to faces** off for a free
+  angle, in which case the bracket sits tangent to the rounded corner.
+- **Bracket spin** rotates the bracket in place on that face, freely or in
+  quarter turns with **Snap spin to 90 deg**. The corner stays where it is and
+  the bracket stays flat on the face; only the direction of the mounted leg
+  changes, and with it the side the mating part sits on. 0 runs the mounted leg
+  along the profile towards its end, 180 towards its start, 90 and 270 across
+  the face.
 - **Lateral offset** shifts it across the face, for example onto the second
   slot of a 40x80.
-- **Free leg** picks which way the mounted leg runs and therefore which side
-  the mating part sits on.
 - **Bracket size** defaults to the profile grid and can be overridden.
+
+![The same bracket at spin 0, 90, 180 and 270 degrees](docs/images/bracket-spin.png)
+
+*One face, four quarter turns of the spin, bottom to top: 0, 90, 180, 270
+degrees. Free angles in between behave the same way.*
 
 The bracket is parented to the profile, so it travels with it, and the profile
 stays active so you can place several in a row and tune the last one in the

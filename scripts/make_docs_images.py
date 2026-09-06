@@ -114,8 +114,7 @@ for post in posts:
     post.select_set(True)
     C.view_layer.objects.active = post
     inward = 180.0 if post.matrix_world.translation.x > 0 else 0.0
-    bpy.ops.alugen.add_bracket_on_profile(offset=corner_z, rotation=inward,
-                                          leg_direction='ALONG_MINUS')
+    bpy.ops.alugen.add_bracket_on_profile(offset=corner_z, rotation=inward, spin=180.0)
 
 bpy.ops.mesh.primitive_cube_add(size=2.0)
 panel = C.active_object
@@ -125,5 +124,22 @@ panel.location = (0.0, 0.0, (corner_z + panel_t * 0.5) * MM)
 panel.color = (0.55, 0.36, 0.18, 1.0)
 render("free-brackets.png", 0.95, (0.75, -0.85, 0.72),
        (math.radians(66), 0, math.radians(41)), (1200, 900))
+
+
+# 5) the same bracket spun in place on one face
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+s.a, s.b, s.slot, s.length, s.axis = '40', '40', 'N8', 420.0, 'Z'
+s.at_cursor = False
+bpy.ops.alugen.add_profile()
+column = C.active_object
+for i, sp in enumerate((0.0, 90.0, 180.0, 270.0)):
+    for o in C.selected_objects:
+        o.select_set(False)
+    column.select_set(True)
+    C.view_layer.objects.active = column
+    bpy.ops.alugen.add_bracket_on_profile(offset=60.0 + i * 100.0, rotation=0.0, spin=sp)
+render("bracket-spin.png", 0.55, (0.63, -0.43, 0.46),
+       (math.radians(72), 0, math.radians(56)), (900, 1000))
 
 print("IMAGES DONE")

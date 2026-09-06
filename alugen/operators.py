@@ -399,26 +399,20 @@ class ALUGEN_OT_add_bracket_on_profile(bpy.types.Operator):
 
     offset: FloatProperty(name="Offset from start (mm)", default=100.0, precision=1,
                           description="Position of the bracket corner along the profile")
-    rotation: FloatProperty(name="Rotation (deg)", default=0.0, min=-360.0, max=360.0,
-                            description="Rotation around the profile axis; 0 is the local +X face")
+    rotation: FloatProperty(name="Around profile (deg)", default=0.0, min=-360.0, max=360.0,
+                            description="Rotate the mounting position around the profile "
+                                        "axis; 0 is the local +X face")
     snap_faces: BoolProperty(name="Snap to faces", default=True,
-                             description="Snap the rotation to the four profile faces")
+                             description="Snap the position to the four profile faces")
+    spin: FloatProperty(name="Bracket spin (deg)", default=0.0, min=-360.0, max=360.0,
+                        description="Rotate the bracket in place on that face; 0 puts the "
+                                    "mounted leg along the profile towards its end, 180 "
+                                    "towards its start, 90 and 270 across the face")
+    snap_spin: BoolProperty(name="Snap spin to 90 deg", default=True,
+                            description="Snap the spin to quarter turns")
     lateral: FloatProperty(name="Lateral offset (mm)", default=0.0, precision=1,
                            description="Shift across the face, for example to reach the "
                                        "second slot of a multi-cell profile")
-    leg_direction: EnumProperty(
-        name="Free leg", default='ALONG_PLUS',
-        items=[('ALONG_PLUS', "Along axis, towards end",
-                "Mounted leg runs towards the profile end, the mating part sits on the "
-                "start side of the bracket"),
-               ('ALONG_MINUS', "Along axis, towards start",
-                "Mounted leg runs towards the profile start, the mating part sits on the "
-                "end side of the bracket"),
-               ('ACROSS_PLUS', "Across face, positive",
-                "Mounted leg runs across the face; the screw lands in a slot only on "
-                "multi-cell profiles"),
-               ('ACROSS_MINUS', "Across face, negative",
-                "Mounted leg runs across the face in the opposite direction")])
     grid: EnumProperty(
         name="Bracket size", default='AUTO',
         items=[('AUTO', "Automatic", "Use the profile grid"), ('20', "20", ""),
@@ -459,9 +453,11 @@ class ALUGEN_OT_add_bracket_on_profile(bpy.types.Operator):
         mw3 = prof.matrix_world.to_3x3()
         n_a = (mw3 @ n_local).normalized()
         axis = builder.profile_axis_world(prof)
-        tangent = (mw3 @ t_local).normalized()
-        n_b = {'ALONG_PLUS': axis, 'ALONG_MINUS': -axis,
-               'ACROSS_PLUS': tangent, 'ACROSS_MINUS': -tangent}[self.leg_direction]
+        spin = math.radians(round(self.spin / 90.0) * 90.0 if self.snap_spin
+                            else self.spin)
+        # Spin turns the bracket in place around the mounting face normal, so the
+        # corner stays put and only the direction of the mounted leg changes.
+        n_b = (Matrix.Rotation(spin, 4, n_a).to_3x3() @ axis).normalized()
 
         grid = min(a, b) if self.grid == 'AUTO' else float(self.grid)
         obj = builder.add_bracket(context, grid, slot, corner, n_a, n_b)
@@ -473,8 +469,9 @@ class ALUGEN_OT_add_bracket_on_profile(bpy.types.Operator):
         # The profile stays active so several brackets can be placed in a row
         # and the redo panel keeps working.
         obj.select_set(True)
-        self.report({'INFO'}, "Bracket %g at %.1f mm, %.0f deg" %
-                    (grid, self.offset, math.degrees(ang) % 360.0))
+        self.report({'INFO'}, "Bracket %g at %.1f mm, face %.0f deg, spin %.0f deg" %
+                    (grid, self.offset, math.degrees(ang) % 360.0,
+                     math.degrees(spin) % 360.0))
         return {'FINISHED'}
 
 
