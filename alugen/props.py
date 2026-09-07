@@ -6,6 +6,8 @@ from bpy.props import (BoolProperty, EnumProperty, FloatProperty, IntProperty,
 
 from . import catalog
 
+MM = 0.001
+
 SIZE_ITEMS = [(str(int(s)), "%d mm" % int(s), "Edge size %d mm" % int(s))
               for s in catalog.SIZES]
 
@@ -26,14 +28,146 @@ KIND_ITEMS = [('PROFILE', "Profile", ""),
               ('TNUT', "T-slot nut", ""),
               ('SCREW', "Screw", ""),
               ('CONNECTOR', "Connector", ""),
+              ('FRAME', "Frame", ""),
               ('OTHER', "Other", "")]
+
+GRID_ITEMS = [('AUTO', "Automatic", "Use the profile grid")] + \
+             [(str(int(s)), "%d" % int(s), "") for s in catalog.SIZES]
+
+# Guard against re-entrant property updates while geometry is being rebuilt
+_BUSY = [False]
+
+
+class busy:
+    """Context manager that suppresses property update callbacks."""
+
+    def __enter__(self):
+        self.prev = _BUSY[0]
+        _BUSY[0] = True
+        return self
+
+    def __exit__(self, *exc):
+        _BUSY[0] = self.prev
+        return False
+
+
+def is_busy():
+    return _BUSY[0]
 
 
 def _rebuild(self, context):
-    from . import builder
+    if is_busy():
+        return
+    from . import builder, mounting
     obj = self.id_data
     if isinstance(obj, bpy.types.Object) and obj.alugen.kind == 'PROFILE':
         builder.rebuild_profile(obj)
+        mounting.refit_children(obj)
+
+
+def _remount(self, context):
+    if is_busy():
+        return
+    from . import mounting
+    obj = self.id_data
+    if isinstance(obj, bpy.types.Object):
+        mounting.remount(obj)
+
+
+def _face_changed(side):
+    def fn(self, context):
+        if is_busy():
+            return
+        from . import frames
+        frames.face_changed(self.id_data, side)
+    return fn
+
+
+def _frame_layout_changed(self, context):
+    if is_busy():
+        return
+    from . import frames
+    frames.update_frame(self.id_data, rebuild_members=True)
+
+
+def _mm_mirror(attr, doc):
+    """Float property in millimetres backed by a stored metre value."""
+    def get(self):
+        return getattr(self, attr) / MM
+
+    def set(self, value):
+        setattr(self, attr, value * MM)
+
+    return FloatProperty(name=doc, get=get, set=set, precision=1)
+
+
+class ALUGEN_PG_frame(bpy.types.PropertyGroup):
+    """Parameters of a generated frame, stored on its controller object.
+
+    The frame is described as a box in the controller's local space, so a face
+    can be dragged without moving the opposite one.
+    """
+
+    fid: StringProperty(name="Frame id", default="")
+
+    x_min: FloatProperty(name="X min", unit='LENGTH', default=-0.3,
+                         update=_face_changed('x_min'))
+    x_max: FloatProperty(name="X max", unit='LENGTH', default=0.3,
+                         update=_face_changed('x_max'))
+    y_min: FloatProperty(name="Y min", unit='LENGTH', default=-0.2,
+                         update=_face_changed('y_min'))
+    y_max: FloatProperty(name="Y max", unit='LENGTH', default=0.2,
+                         update=_face_changed('y_max'))
+    z_min: FloatProperty(name="Z min", unit='LENGTH', default=0.0,
+                         update=_face_changed('z_min'))
+    z_max: FloatProperty(name="Z max", unit='LENGTH', default=0.8,
+                         update=_face_changed('z_max'))
+
+    a: EnumProperty(name="A", items=SIZE_ITEMS, default='40',
+                    update=_frame_layout_changed)
+    b: EnumProperty(name="B", items=SIZE_ITEMS, default='40',
+                    update=_frame_layout_changed)
+    slot: EnumProperty(name="Slot", items=SLOT_ITEMS, default='N8',
+                       update=_frame_layout_changed)
+    levels: IntProperty(name="Intermediate levels", default=0, min=0, max=6,
+                        update=_frame_layout_changed)
+    top: BoolProperty(name="Top frame", default=True, update=_frame_layout_changed)
+    bottom: BoolProperty(name="Bottom frame", default=True, update=_frame_layout_changed)
+    brackets: BoolProperty(name="Brackets", default=True, update=_frame_layout_changed)
+    caps: BoolProperty(name="End caps", default=True, update=_frame_layout_changed)
+    corner_cavity: BoolProperty(name="Corner cavities", default=False,
+                                update=_frame_layout_changed)
+
+    def _size(axis):
+        def get(self):
+            return (getattr(self, axis + "_max") - getattr(self, axis + "_min")) / MM
+
+        def set(self, value):
+            # Typing a size keeps the minimum face where it is
+            setattr(self, axis + "_max", getattr(self, axis + "_min") + value * MM)
+
+        return FloatProperty(name="Size %s (mm)" % axis.upper(), get=get, set=set,
+                             precision=1)
+
+    size_x: _size('x')
+    size_y: _size('y')
+    size_z: _size('z')
+
+    # Mirrors so an arrow gizmo pointing outwards always grows the frame
+    def _neg(attr):
+        def get(self):
+            return -getattr(self, attr)
+
+        def set(self, value):
+            setattr(self, attr, -value)
+
+        return FloatProperty(name="-" + attr, unit='LENGTH', get=get, set=set)
+
+    x_min_neg: _neg('x_min')
+    y_min_neg: _neg('y_min')
+    z_min_neg: _neg('z_min')
+
+    warning: StringProperty(name="Warning", default="")
 
 
 class ALUGEN_PG_object(bpy.types.PropertyGroup):
@@ -59,10 +193,53 @@ class ALUGEN_PG_object(bpy.types.PropertyGroup):
     attach_end: EnumProperty(
         name="End", items=[('START', "Start", ""), ('END', "End", "")], default='END')
 
-    # Parts list data
+    # --- hardware mounted on a single profile -----------------------------
+    has_mount: BoolProperty(default=False)
+    mount_offset: FloatProperty(
+        name="Offset (mm)", description="Position along the host profile",
+        default=0.0, precision=1, update=_remount)
+    mount_rotation: FloatProperty(
+        name="Around profile", description="Rotation around the host profile axis",
+        default=0.0, subtype='ANGLE', update=_remount)
+    mount_spin: FloatProperty(
+        name="Spin", description="Rotation of the part on the mounting face",
+        default=0.0, subtype='ANGLE', update=_remount)
+    mount_lateral: FloatProperty(
+        name="Lateral (mm)", description="Shift across the mounting face",
+        default=0.0, precision=1, update=_remount)
+    mount_snap_faces: BoolProperty(name="Snap to faces", default=True, update=_remount)
+    mount_snap_spin: BoolProperty(name="Snap spin to 90 deg", default=True, update=_remount)
+    mount_grid: EnumProperty(name="Bracket size", items=GRID_ITEMS, default='AUTO')
+
+    # --- frame membership --------------------------------------------------
+    fid: StringProperty(name="Frame id", default="")
+    role: StringProperty(name="Frame role", default="")
+    role_i: IntProperty(name="Role index", default=0)
+    frame: PointerProperty(type=ALUGEN_PG_frame)
+
+    # --- parts list --------------------------------------------------------
     part_id: StringProperty(name="Part id", default="")
     part_name: StringProperty(name="Description", default="")
     note: StringProperty(name="Note", default="")
+
+    # Gizmo target: cut length expressed in Blender units
+    def _len_bu_get(self):
+        return self.length * MM
+
+    def _len_bu_set(self, value):
+        self.length = max(catalog.LEN_MIN, min(catalog.LEN_MAX, value / MM))
+
+    length_bu: FloatProperty(name="Length", unit='LENGTH',
+                             get=_len_bu_get, set=_len_bu_set)
+
+    def _off_bu_get(self):
+        return self.mount_offset * MM
+
+    def _off_bu_set(self, value):
+        self.mount_offset = value / MM
+
+    mount_offset_bu: FloatProperty(name="Offset", unit='LENGTH',
+                                   get=_off_bu_get, set=_off_bu_set)
 
 
 class ALUGEN_PG_scene(bpy.types.PropertyGroup):
@@ -87,12 +264,20 @@ class ALUGEN_PG_scene(bpy.types.PropertyGroup):
     frame_brackets: BoolProperty(name="Add brackets", default=True)
     frame_caps: BoolProperty(name="Add end caps", default=True)
 
+    # Viewport
+    show_gizmos: BoolProperty(
+        name="Show gizmos", default=True,
+        description="Draw drag handles on the selected profile, part or frame")
+    gizmo_hardware: BoolProperty(
+        name="Hardware handles", default=True,
+        description="Draw the offset arrow and the rotation dials on mounted hardware")
+
     # Parts list
     bom_path: StringProperty(name="File", subtype='FILE_PATH',
                              default="//parts_list.csv")
 
 
-CLASSES = (ALUGEN_PG_object, ALUGEN_PG_scene)
+CLASSES = (ALUGEN_PG_frame, ALUGEN_PG_object, ALUGEN_PG_scene)
 
 
 def register():

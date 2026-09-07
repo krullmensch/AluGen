@@ -7,7 +7,7 @@ joins them, places hardware and produces a parts list you can order from.
 bl_info = {
     "name": "AluGen",
     "author": "Marvin Krullmann",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar (N) > AluGen",
     "description": "Parametric aluminium extrusion profiles, joints and parts list",
@@ -17,14 +17,15 @@ bl_info = {
 import importlib
 
 if "catalog" in locals():  # Blender "Reload Scripts"
-    for _name in ("catalog", "geometry", "props", "builder", "bom",
-                  "operators", "assemblies", "ui"):
+    for _name in ("catalog", "geometry", "props", "builder", "mounting", "bom",
+                  "operators", "frames", "assemblies", "gizmos", "ui"):
         if _name in locals():
             importlib.reload(locals()[_name])
 
-from . import catalog, geometry, props, builder, bom, operators, assemblies, ui
+from . import (catalog, geometry, props, builder, mounting, bom, operators,
+               frames, assemblies, gizmos, ui)
 
-_REGISTER = (props, bom, operators, assemblies, ui)
+_REGISTER = (props, bom, operators, frames, assemblies, gizmos, ui)
 
 
 def register():

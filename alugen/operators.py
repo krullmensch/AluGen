@@ -6,7 +6,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 from mathutils import Matrix, Vector
 
-from . import bom, builder, catalog, geometry
+from . import bom, builder, catalog, geometry, mounting  # noqa: F401
 from .geometry import MM
 
 FACE_ITEMS = [('X+', "+X", "Face along local +X"),
@@ -55,6 +55,15 @@ def place_profile(obj, start_world, rot):
     z0 = local_start_z(obj)
     offset = rot.to_3x3() @ Vector((0.0, 0.0, z0))
     obj.matrix_world = Matrix.Translation(Vector(start_world) - offset) @ rot.to_3x3().to_4x4()
+
+
+def _parent_keep_transform(obj, host):
+    """Parent a part to its host profile without moving it."""
+    mat = obj.matrix_world.copy()
+    obj.parent = host
+    obj.matrix_parent_inverse = host.matrix_world.inverted()
+    obj.matrix_world = mat
+    return obj
 
 
 def face_normal_world(obj, face):
@@ -430,48 +439,33 @@ class ALUGEN_OT_add_bracket_on_profile(bpy.types.Operator):
         a, b, length = builder.profile_dims(prof)
         slot = prof.alugen.slot
 
-        ang = math.radians(self.rotation)
-        if self.snap_faces:
-            ang = math.radians(round(self.rotation / 90.0) * 90.0)
-        n_local = Vector((math.cos(ang), math.sin(ang), 0.0))
-        t_local = Vector((-math.sin(ang), math.cos(ang), 0.0))
-
-        # Distance from the profile axis to the outer surface along n_local.
-        # Support function of the rounded rectangle, so the bracket also sits
-        # tangent to the rounded corners at free angles.
-        r_corner = geometry.resolve_spec(a, b, slot)['corner_r']
-        surf = ((a * 0.5 - r_corner) * abs(n_local.x)
-                + (b * 0.5 - r_corner) * abs(n_local.y) + r_corner)
-
-        z_local = local_start_z(prof) / MM + self.offset
+        rot = math.radians(self.rotation)
+        spin = math.radians(self.spin)
         if self.offset < -1e-6 or self.offset > length + 1e-6:
             self.report({'WARNING'}, "Offset %.1f mm is outside the profile length %.1f mm"
                         % (self.offset, length))
-        p_local = n_local * surf + t_local * self.lateral + Vector((0.0, 0.0, z_local))
-        corner = prof.matrix_world @ Vector((p_local.x * MM, p_local.y * MM, p_local.z * MM))
-
-        mw3 = prof.matrix_world.to_3x3()
-        n_a = (mw3 @ n_local).normalized()
-        axis = builder.profile_axis_world(prof)
-        spin = math.radians(round(self.spin / 90.0) * 90.0 if self.snap_spin
-                            else self.spin)
-        # Spin turns the bracket in place around the mounting face normal, so the
-        # corner stays put and only the direction of the mounted leg changes.
-        n_b = (Matrix.Rotation(spin, 4, n_a).to_3x3() @ axis).normalized()
-
+        corner, n_a, n_b = mounting.mount_frame(prof, self.offset, rot, spin, self.lateral,
+                                                self.snap_faces, self.snap_spin)
         grid = min(a, b) if self.grid == 'AUTO' else float(self.grid)
         obj = builder.add_bracket(context, grid, slot, corner, n_a, n_b)
+        mounting.store_mount(obj, self.offset, rot, spin, self.lateral,
+                             self.snap_faces, self.snap_spin, self.grid)
         if self.parent_to_profile:
             mat = obj.matrix_world.copy()
             obj.parent = prof
             obj.matrix_parent_inverse = prof.matrix_world.inverted()
             obj.matrix_world = mat
+            note = mounting.fit_offset(obj, prof)
+            if note:
+                self.report({'WARNING'}, "%s %s" % (obj.name, note))
         # The profile stays active so several brackets can be placed in a row
         # and the redo panel keeps working.
         obj.select_set(True)
+        shown_rot = mounting.snap_angle(rot) if self.snap_faces else rot
+        shown_spin = mounting.snap_angle(spin) if self.snap_spin else spin
         self.report({'INFO'}, "Bracket %g at %.1f mm, face %.0f deg, spin %.0f deg" %
-                    (grid, self.offset, math.degrees(ang) % 360.0,
-                     math.degrees(spin) % 360.0))
+                    (grid, obj.alugen.mount_offset,
+                     math.degrees(shown_rot) % 360.0, math.degrees(shown_spin) % 360.0))
         return {'FINISHED'}
 
 
@@ -511,7 +505,9 @@ class ALUGEN_OT_add_tnut(bpy.types.Operator):
         rot = basis(-(prof.matrix_world.to_3x3() @ n_local).normalized(),
                     builder.profile_axis_world(prof))
         mat = Matrix.Translation(prof.matrix_world @ loc_m) @ rot.to_3x3().to_4x4()
-        builder.add_tnut(context, slot, mat, None if self.thread == 'AUTO' else self.thread)
+        nut = builder.add_tnut(context, slot, mat,
+                               None if self.thread == 'AUTO' else self.thread)
+        _parent_keep_transform(nut, prof)
         return {'FINISHED'}
 
 
@@ -542,13 +538,15 @@ class ALUGEN_OT_add_connector(bpy.types.Operator):
         start, _stop = builder.profile_span(prof)
 
         if self.kind == 'CUBE':
-            builder.add_cube_connector(context, min(a, b), slot,
-                                       Matrix.Translation(start + axis * (self.offset * MM)))
+            _parent_keep_transform(
+                builder.add_cube_connector(context, min(a, b), slot,
+                                           Matrix.Translation(start + axis * (self.offset * MM))),
+                prof)
         elif self.kind == 'BUTT':
             n = face_normal_world(prof, self.face)
             p = start + axis * (self.offset * MM) + n * face_halfdim(prof, self.face)
             mat = Matrix.Translation(p) @ basis(n, axis).to_3x3().to_4x4()
-            builder.add_butt_connector(context, slot, mat)
+            _parent_keep_transform(builder.add_butt_connector(context, slot, mat), prof)
         else:
             n_local = FACE_VEC[self.face]
             half = (a if self.face.startswith('X') else b) * 0.5
@@ -563,7 +561,7 @@ class ALUGEN_OT_add_connector(bpy.types.Operator):
             loc_m = Vector((local.x * MM, local.y * MM, local.z * MM))
             rot = basis(axis, (prof.matrix_world.to_3x3() @ n_local).normalized())
             mat = Matrix.Translation(prof.matrix_world @ loc_m) @ rot.to_3x3().to_4x4()
-            builder.add_bar_connector(context, slot, mat)
+            _parent_keep_transform(builder.add_bar_connector(context, slot, mat), prof)
         return {'FINISHED'}
 
 

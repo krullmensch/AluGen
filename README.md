@@ -29,7 +29,10 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
   for panels, plates, feet, rails or anything else that is not another
   extrusion. It still lands in the parts list.
 - **Frame generator**: enter outer width, depth and height, get four posts,
-  the rails, the brackets and the caps with the correct cut lengths.
+  the rails, the brackets and the caps with the correct cut lengths. The frame
+  stays editable: move one side and every profile, bracket and cap follows.
+- **Viewport gizmos**: drag a profile to length, slide a bracket along its
+  profile, spin it, or pull a whole frame side out, all in the viewport.
 - **Parts list**: live in the sidebar, exportable as CSV and TXT, grouped by
   profile size and by hardware type.
 - **Validation**: flags cut lengths outside the usable range, scaled objects
@@ -41,8 +44,8 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
 
 ## Installation
 
-1. Download `alugen-1.2.0.zip` from the releases page, or build it yourself
-   with `./scripts/build_zip.sh`.
+1. Download the latest `alugen-x.y.z.zip` from the releases page, or build it
+   yourself with `./scripts/build_zip.sh`.
 2. In Blender open `Preferences > Add-ons`, use the dropdown in the top right
    and choose `Install from Disk...`, then pick the zip.
 3. Enable the entry named **AluGen**.
@@ -84,6 +87,48 @@ The outer dimensions come out exact. A 800 x 600 x 900 mm frame measures
 every run.
 
 ![Joint detail](docs/images/joint-detail.png)
+
+## Visual editing
+
+Click a part and drag its handles. Nothing has to be typed unless you want an
+exact number, and every handle writes the same properties the panel shows, so
+the two always agree.
+
+![Frame side handles and the AluGen sidebar](docs/images/gizmos.png)
+
+**A single profile** gets a length handle at its start, pointing along its
+axis. Dragging the tip sets the cut length; the mesh is rebuilt by moving the
+end faces only, so it stays responsive.
+
+**A frame** gets one arrow per side, on the controller and on every member, so
+clicking any rail is enough to grab the frame. Dragging an arrow moves that
+side only, the opposite side stays where it is. Everything adapts:
+
+- posts move and, for the Z sides, change length
+- X and Y rails get their new cut length, `X - 2 * A` and `Y - 2 * B`
+- the corner brackets follow the rail ends
+- end caps stay on the post ends
+- hardware you mounted yourself is re-fitted, see below
+
+If a rail becomes too short for a bracket, the bracket is removed and the frame
+reports it. If a rail drops below the minimum cut length it is removed too.
+Shrinking further than the profiles themselves is blocked at the point where
+the posts touch.
+
+**Mounted hardware** gets three handles: an arrow along the host profile for
+the offset, an orange dial for the spin, and a green dial for the rotation
+around the profile. A part that would slide off its host is pulled back onto
+it and says so in the panel; a part that cannot fit at all, because the profile
+is now shorter than the part itself, is flagged instead of being moved.
+
+The `Frame` panel carries the same values as numbers: width, depth and height,
+plus a row of buttons that move a single side in 10 mm steps. Handles can be
+switched off entirely under `Show gizmos`.
+
+A note on frames: their profiles are generated, so their length and position
+are owned by the frame. Editing those by hand is overwritten on the next frame
+update. Parts you add yourself are yours and are only re-fitted, never
+replaced.
 
 ## Brackets that carry something other than a profile
 
@@ -127,6 +172,7 @@ the post tops. The panel itself is not an AluGen part.*
 | Edit selection | Change the dimensions of the selected profile, mesh rebuilds live |
 | Join | Butt against end, perpendicular on face, parallel to face, fit length between |
 | Hardware | End caps, angle brackets at a joint or anywhere on a single profile, T-slot nuts, connectors |
+| Frame | Size, layout and side handles of the selected frame, plus its cut list and warnings |
 | Frame generator | Full cuboid frame with a cut list preview |
 | Parts list | Live list, CSV and TXT export, clipboard, text block, validation |
 
@@ -166,6 +212,9 @@ ordering is the description in the parts list.
 - Fasteners are not simulated, and there is no collision or load check.
 - Do not scale objects. Change the `Length` field instead. The validation
   reports scaled objects because their dimensions no longer match the model.
+- Undo after a gizmo drag reverts the drag, but Blender does not always push a
+  separate undo step per drag, so check the result rather than assuming a
+  one-to-one history.
 
 ## Development
 
@@ -179,6 +228,13 @@ It checks that every cross-section is free of self-intersections, that the
 generated meshes are watertight with outward normals, that outer dimensions and
 cut lengths are exact, that brackets touch two profiles without intersecting
 them, and that the operators and the parts list export behave.
+
+The editable frame, the mounted hardware and the gizmo targets have their own
+suite:
+
+```
+blender --background --factory-startup --python tests/test_frames.py
+```
 
 Regenerate the documentation images and the example file:
 
@@ -195,8 +251,11 @@ alugen/          the add-on
   geometry.py    cross-section, extrusion, hardware meshes
   props.py       property groups on object and scene
   builder.py     object creation, materials, placement
+  mounting.py    placing hardware on a profile and keeping it there
+  frames.py      editable frames: layout, update, side operators
+  gizmos.py      viewport handles for profiles, hardware and frames
   operators.py   operators
-  assemblies.py  frame generator
+  assemblies.py  frame generator entry point
   bom.py         parts list and validation
   ui.py          sidebar panels
 docs/images/     rendered documentation images
