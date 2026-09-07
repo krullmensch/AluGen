@@ -145,6 +145,11 @@ class ALUGEN_PG_frame(bpy.types.PropertyGroup):
     caps: BoolProperty(name="End caps", default=True, update=_frame_layout_changed)
     corner_cavity: BoolProperty(name="Corner cavities", default=False,
                                 update=_frame_layout_changed)
+    bracket_avoid_panels: BoolProperty(
+        name="Keep brackets clear of panels", default=True,
+        update=_frame_layout_changed,
+        description="Move a corner bracket to the other side of its rail when a panel "
+                    "would run into it, and drop it if there is no room either way")
 
     def _size(axis):
         def get(self):

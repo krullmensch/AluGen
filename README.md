@@ -197,6 +197,15 @@ the panel height, and the cut-outs are recomputed with everything else.
 
 ![Top view of the shelf, cut around the four posts](docs/images/panel-notch.png)
 
+**Brackets in the way** are moved, not left inside the panel. When a panel is
+added or changed, every corner bracket of the frame is checked against it. One
+that would end up in the material is flipped to the other side of its rail, and
+if there is no room there either it is removed and the frame says so. A bracket
+you placed by hand is turned to the opposite face of its profile instead, and if
+that does not help it is reported and left alone, because deleting your work is
+not the add-on's call. The whole check can be switched off per frame with
+`Keep brackets clear of panels`.
+
 **Support brackets** are the answer to an inset panel: one or two per post,
 placed so their upper face meets the underside of the panel. Make the panel
 thicker and they move down with it, so the top stays flush. They are ordinary
@@ -262,8 +271,9 @@ ordering is the description in the parts list.
   one-to-one history.
 - A panel cut-out uses the bounding box of the profile, so a rounded profile
   corner is cut square. The result always fits, it is just not a contour cut.
-- Panels cut around profiles, not around hardware. A bracket in the way has to
-  be moved by hand.
+- Panels cut around profiles, not around hardware. Brackets are moved out of
+  the way instead of being cut around, and hardware other than brackets is only
+  reported.
 - Panel support brackets are placed on the posts of a frame. A panel without a
   frame carries no supports.
 

@@ -223,6 +223,110 @@ check(len(issues) == 0, "validation is clean (%d)" % len(issues))
 for i in issues[:5]:
     print("    ! " + i)
 
+from alugen import frames as _frames  # noqa: E402
+
+
+def rail_brackets(ctrl):
+    return [o for o in _frames.members(ctrl) if o.alugen.kind == 'BRACKET']
+
+
+def facing_up(brk):
+    """True when the mounting face of the bracket points up."""
+    return (brk.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).z > 0.5
+
+
+print("\n=== A panel pushes the corner brackets out of the way ===")
+ctrl = make_frame(levels=1)
+before = rail_brackets(ctrl)
+mid_up = [b for b in before
+          if facing_up(b) and abs(b.matrix_world.translation.z / MM - 450.0) < 25.0]
+check(len(mid_up) == 8, "the mid level starts with 8 brackets facing up (%d)" % len(mid_up))
+
+bpy.ops.alugen.add_panel(material='PLYWOOD', mode='ON_TOP', fit='OUTER',
+                         level='MID_1', supports=0)
+panel = C.active_object
+C.view_layer.update()
+after = rail_brackets(ctrl)
+mid = [b for b in after if abs(b.matrix_world.translation.z / MM - 450.0) < 45.0]
+check(len(after) == len(before), "no bracket was lost (%d)" % len(after))
+check(all(not facing_up(b) for b in mid),
+      "every mid bracket now sits under its rail (%d of %d still up)"
+      % (sum(1 for b in mid if facing_up(b)), len(mid)))
+worst = max(panels.blocked_area(b, panel) for b in after)
+check(worst < panels.BLOCK_AREA,
+      "no bracket runs into the panel any more (worst %.2f mm2)" % worst)
+
+print("\n=== Squeezed from both sides the bracket is dropped ===")
+# A second panel just below the level: it does not reach the rail, so it has no
+# cut-out there and the bracket that moved down runs straight into it.
+bpy.ops.alugen.add_panel(material='MDF', mode='ON_TOP', fit='OUTER', level='CUSTOM',
+                         thickness=30.0, supports=0)
+under = C.active_object
+under.alugen.panel.z = 380.0
+C.view_layer.update()
+left = rail_brackets(ctrl)
+check(len(left) < len(after), "brackets with no room were removed (%d left of %d)"
+      % (len(left), len(after)))
+check("was removed" in ctrl.alugen.frame.warning or
+      any("removed" in o.alugen.panel.warning for o in panels.panels_of_frame(ctrl)),
+      "and it is reported")
+bpy.data.objects.remove(under, do_unlink=True)
+C.view_layer.objects.active = ctrl
+bpy.ops.alugen.frame_update()
+check(len(rail_brackets(ctrl)) == len(before),
+      "removing that panel brings the brackets back (%d)" % len(rail_brackets(ctrl)))
+
+print("\n=== A bracket placed by hand moves to the other face ===")
+ctrl = make_frame(levels=1)
+mid_z = 450.0  # frame is 900 tall with one intermediate level
+rails_mid = sorted((o for o in _frames.members(ctrl)
+                    if o.alugen.role == _frames.ROLE_RAIL and o.alugen.kind == 'PROFILE'),
+                   key=lambda o: abs(o.matrix_world.translation.z / MM - mid_z))
+check(bool(rails_mid) and abs(rails_mid[0].matrix_world.translation.z / MM - mid_z) < 1.0,
+      "found a rail at the intermediate level")
+rail = rails_mid[0]
+for o in C.selected_objects:
+    o.select_set(False)
+rail.select_set(True)
+C.view_layer.objects.active = rail
+bpy.ops.alugen.add_bracket_on_profile(offset=300.0, rotation=0.0, spin=0.0)
+manual = [o for o in C.scene.objects
+          if o.alugen.has_mount and not o.alugen.support_pid and o.parent is rail][-1]
+# Which rotation points at the sky depends on whether this is an X or a Y rail
+for deg in (0.0, 90.0, 180.0, 270.0):
+    manual.alugen.mount_rotation = math.radians(deg)
+    C.view_layer.update()
+    if facing_up(manual):
+        break
+rot_before = manual.alugen.mount_rotation
+check(facing_up(manual), "it starts on the upper face of the rail")
+
+for o in C.selected_objects:
+    o.select_set(False)
+ctrl.select_set(True)
+C.view_layer.objects.active = ctrl
+bpy.ops.alugen.add_panel(material='PLYWOOD', mode='ON_TOP', fit='OUTER',
+                         level='MID_1', supports=0)
+panel = C.active_object
+C.view_layer.update()
+check(manual.name in bpy.data.objects, "a hand placed bracket is never deleted")
+check(not facing_up(manual), "it moved to the underside of the rail")
+check(abs(abs(manual.alugen.mount_rotation - rot_before) - math.pi) < 1e-6,
+      "by half a turn around the profile axis")
+check(panels.blocked_area(manual, panel) < panels.BLOCK_AREA,
+      "and it is clear of the panel (%.2f mm2)" % panels.blocked_area(manual, panel))
+
+print("\n=== The check can be switched off ===")
+ctrl = make_frame(levels=1)
+ctrl.alugen.frame.bracket_avoid_panels = False
+bpy.ops.alugen.add_panel(material='PLYWOOD', mode='ON_TOP', fit='OUTER',
+                         level='MID_1', supports=0)
+panel = C.active_object
+C.view_layer.update()
+mid = [b for b in rail_brackets(ctrl)
+       if abs(b.matrix_world.translation.z / MM - 450.0) < 45.0]
+check(any(facing_up(b) for b in mid), "with the option off the brackets stay put")
+
 alugen.unregister()
 print("\n==== RESULT: %d failures ====" % len(FAIL))
 for f_ in FAIL:

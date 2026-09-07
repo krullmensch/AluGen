@@ -132,7 +132,8 @@ def layout(f):
             for e, (joint, n_b) in enumerate(((start, axis_dir), (stop, -axis_dir))):
                 brackets.append(dict(role=ROLE_BRACKET, i=rail['i'] * 2 + e,
                                      corner=tuple(joint + n_face * (rail['face_dim'] * 0.5)),
-                                     n_a=tuple(n_face), n_b=tuple(n_b), grid=grid))
+                                     n_a=tuple(n_face), n_b=tuple(n_b), grid=grid,
+                                     joint=tuple(joint), face_dim=rail['face_dim']))
 
     if abs(a - b) > 1e-6:
         warnings.append("A and B differ: brackets sit in the middle of the face, "
@@ -226,6 +227,7 @@ def update_frame(ctrl, rebuild_members=True, context=None):
         kept.add(key)
         profiles.append((obj, spec))
 
+    placed_brackets = {}
     for spec in brackets:
         key = (spec['role'], spec['i'])
         obj = existing.get(key)
@@ -236,6 +238,7 @@ def update_frame(ctrl, rebuild_members=True, context=None):
         matrix = mounting.basis_matrix(Vector(spec['corner']) * MM,
                                        Vector(spec['n_a']), Vector(spec['n_b']))
         _attach(obj, ctrl, matrix, spec['role'], spec['i'])
+        placed_brackets[key] = (obj, spec)
         kept.add(key)
 
     for key, obj in existing.items():
@@ -263,9 +266,12 @@ def update_frame(ctrl, rebuild_members=True, context=None):
         for note in mounting.refit_children(obj):
             warnings.append(note)
 
-    # Panels take their size and height from the frame
+    # Panels take their size and height from the frame, and a bracket that ends
+    # up inside one has to move out of the way
     from . import panels
     warnings += panels.update_panels_of_frame(ctrl, context)
+    if f.bracket_avoid_panels:
+        warnings += panels.resolve_bracket_conflicts(ctrl, placed_brackets, context)
 
     with props.busy():
         f.warning = " | ".join(warnings)

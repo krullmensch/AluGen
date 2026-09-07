@@ -110,6 +110,9 @@ def cut_sources(obj):
     return [o for o in pool if o.alugen.is_part and o.alugen.kind == 'PROFILE']
 
 
+# Guard so a panel update and the conflict pass do not call each other
+_RESOLVING = [False]
+
 # A cut-out smaller than this is a rounding sliver where the panel edge and a
 # profile meet, not a real notch.
 MIN_CUTOUT_AREA = 1.0  # mm2
@@ -219,6 +222,12 @@ def update_panel(obj, context=None):
                             % blocked)
 
     warnings += sync_supports(obj, context)
+    if ctrl is not None and ctrl.alugen.frame.bracket_avoid_panels and not _RESOLVING[0]:
+        _RESOLVING[0] = True
+        try:
+            warnings += resolve_bracket_conflicts(ctrl, None, context)
+        finally:
+            _RESOLVING[0] = False
     with props.busy():
         p.warning = " | ".join(warnings)
         obj.alugen.note = p.warning
@@ -451,3 +460,145 @@ def register():
 def unregister():
     for c in reversed(CLASSES):
         bpy.utils.unregister_class(c)
+
+
+# --------------------------------------------------------------------------
+# Keeping hardware out of a panel
+# --------------------------------------------------------------------------
+
+# A part overlapping a panel by less than this is touching it, not blocking it.
+BLOCK_AREA = 4.0      # mm2 of shared footprint
+BLOCK_DEPTH = 0.05    # mm of shared thickness
+
+
+def panels_of_frame(ctrl):
+    fid = ctrl.alugen.frame.fid
+    return [o for o in ctrl.children if is_panel(o) and o.alugen.fid == fid]
+
+
+def blocked_area(obj, panel):
+    """How much of obj sits inside the material of panel, in square millimetres.
+
+    Measured in the panel's own space: the part has to share thickness with the
+    panel and cover ground that was not cut away anyway.
+    """
+    p = panel.alugen.panel
+    plan = panel_plan(panel)
+    width, depth, thickness = plan['width'], plan['depth'], p.thickness
+    inv = panel.matrix_world.inverted()
+    pts = [(inv @ (obj.matrix_world @ Vector(c))) / MM for c in obj.bound_box]
+    zs = [q.z for q in pts]
+    if min(max(zs), thickness) - max(min(zs), 0.0) <= BLOCK_DEPTH:
+        return 0.0
+    hull = geometry.convex_hull([(q.x, q.y) for q in pts])
+    if len(hull) < 3:
+        return 0.0
+    outline = [(-width * 0.5, -depth * 0.5), (width * 0.5, -depth * 0.5),
+               (width * 0.5, depth * 0.5), (-width * 0.5, depth * 0.5)]
+    inside = geometry.clip_to_convex(hull, outline)
+    if len(inside) < 3:
+        return 0.0
+    area = geometry.polygon_area(inside)
+    for notch in cutouts_for(panel, width, depth, thickness, panel.matrix_world):
+        cut = geometry.clip_to_convex(hull, notch)
+        if len(cut) >= 3:
+            area -= geometry.polygon_area(cut)
+    return max(0.0, area)
+
+
+def blocking_panels(obj, panel_list):
+    return [pan for pan in panel_list
+            if obj.alugen.support_pid != pan.alugen.panel.pid
+            and blocked_area(obj, pan) > BLOCK_AREA]
+
+
+def bracket_map(ctrl):
+    """Rebuild {(role, index): (object, layout spec)} for the frame brackets."""
+    _posts, _rails, brackets, _warn = frames.layout(ctrl.alugen.frame)
+    specs = {(s['role'], s['i']): s for s in brackets}
+    found = {}
+    for obj in frames.members(ctrl):
+        key = (obj.alugen.role, obj.alugen.role_i)
+        if obj.alugen.kind == 'BRACKET' and key in specs:
+            found[key] = (obj, specs[key])
+    return found
+
+
+def resolve_bracket_conflicts(ctrl, placed_brackets=None, context=None):
+    """Move brackets out of the panels of a frame.
+
+    A generated corner bracket is flipped to the other side of its rail and
+    dropped if it still does not fit. A bracket the user placed by hand is spun
+    to the other side of its mounting face and otherwise only reported, because
+    it is not ours to delete.
+    """
+    context = context or bpy.context
+    panel_list = panels_of_frame(ctrl)
+    if not panel_list:
+        return []
+    if placed_brackets is None:
+        placed_brackets = bracket_map(ctrl)
+    try:
+        context.view_layer.update()
+    except (AttributeError, RuntimeError):
+        pass
+
+    infos = []
+    warnings = []
+    for key, (obj, spec) in list(placed_brackets.items()):
+        if obj.name not in bpy.data.objects:
+            continue
+        hit = blocking_panels(obj, panel_list)
+        if not hit:
+            continue
+        # Same joint, other side of the rail
+        joint = Vector(spec['joint'])
+        n_a = -Vector(spec['n_a'])
+        corner = joint + n_a * (spec['face_dim'] * 0.5)
+        obj.matrix_basis = mounting.basis_matrix(corner * MM, n_a, Vector(spec['n_b']))
+        try:
+            context.view_layer.update()
+        except (AttributeError, RuntimeError):
+            pass
+        if blocking_panels(obj, panel_list):
+            warnings.append("%s had no room next to %s and was removed"
+                            % (obj.name, hit[0].name))
+            bpy.data.objects.remove(obj, do_unlink=True)
+            placed_brackets.pop(key, None)
+        else:
+            infos.append("%s moved to the other side of its rail, %s was in the way"
+                         % (obj.name, hit[0].name))
+
+    # Hardware the user mounted on a profile of this frame
+    mounted = [(child, host) for host in frames.members(ctrl)
+               if host.alugen.kind == 'PROFILE'
+               for child in host.children
+               if child.alugen.has_mount and not child.alugen.support_pid]
+    for obj, host in mounted:
+        p = obj.alugen
+        hit = blocking_panels(obj, panel_list)
+        if not hit:
+            continue
+        # Half a turn around the profile axis puts it on the opposite face,
+        # which is the underside when it was sitting on top of a rail.
+        with props.busy():
+            p.mount_rotation = p.mount_rotation + math.pi
+        mounting.apply_mount(obj, host)
+        try:
+            context.view_layer.update()
+        except (AttributeError, RuntimeError):
+            pass
+        if blocking_panels(obj, panel_list):
+            with props.busy():
+                p.mount_rotation = p.mount_rotation - math.pi
+            mounting.apply_mount(obj, host)
+            note = "%s runs into %s, move it by hand" % (obj.name, hit[0].name)
+            with props.busy():
+                p.note = note
+            warnings.append(note)
+        else:
+            infos.append("%s moved to the opposite face of %s, %s was in the way"
+                         % (obj.name, host.name, hit[0].name))
+    for line in infos:
+        print("[AluGen] " + line)
+    return warnings

@@ -219,6 +219,9 @@ class ALUGEN_PT_frame_edit(_Base, bpy.types.Panel):
         row = col.row(align=True)
         row.prop(f, "brackets", toggle=True)
         row.prop(f, "caps", toggle=True)
+        sub = col.row(align=True)
+        sub.enabled = f.brackets
+        sub.prop(f, "bracket_avoid_panels", toggle=True)
 
         a, b = float(f.a), float(f.b)
         cut = lay.box().column(align=True)
