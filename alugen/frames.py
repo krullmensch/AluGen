@@ -263,6 +263,10 @@ def update_frame(ctrl, rebuild_members=True, context=None):
         for note in mounting.refit_children(obj):
             warnings.append(note)
 
+    # Panels take their size and height from the frame
+    from . import panels
+    warnings += panels.update_panels_of_frame(ctrl, context)
+
     with props.busy():
         f.warning = " | ".join(warnings)
     return warnings

@@ -2,7 +2,7 @@
 
 import bpy
 
-from . import bom, catalog, frames, mounting
+from . import bom, catalog, frames, mounting, panels
 
 
 class _Base:
@@ -57,6 +57,44 @@ class ALUGEN_PT_edit(_Base, bpy.types.Panel):
         p = obj.alugen
         if p.kind == 'FRAME':
             lay.label(text="Frame controller, see the Frame panel", icon='MOD_BUILD')
+            return
+        if p.kind == 'PANEL':
+            pan = p.panel
+            col = lay.column(align=True)
+            col.prop(pan, "material")
+            if pan.material == 'OTHER':
+                col.prop(pan, "custom_material")
+            col.prop(pan, "thickness")
+            col.prop(pan, "mode")
+            col.prop(pan, "fit")
+            if pan.fit == 'CUSTOM':
+                col.prop(pan, "width")
+                col.prop(pan, "depth")
+            col.prop(pan, "level")
+            if pan.level == 'CUSTOM':
+                col.prop(pan, "z")
+            if pan.mode == 'IN_SLOT':
+                col.prop(pan, "slot_engagement")
+            col = lay.column(align=True)
+            col.prop(pan, "clearance")
+            col.prop(pan, "corner_radius")
+            col.prop(pan, "notch")
+            sub = col.column(align=True)
+            sub.enabled = pan.notch
+            sub.prop(pan, "notch_clearance")
+            box = lay.box().column(align=True)
+            box.scale_y = 0.8
+            box.label(text="%.1f x %.1f x %.1f mm" % (pan.width, pan.depth, pan.thickness))
+            box.label(text="Cut-outs: %d" % pan.cutouts)
+            if pan.warning:
+                for line in pan.warning.split(" | "):
+                    box.label(text=line, icon='ERROR')
+            row = lay.row(align=True)
+            for n, text in ((0, "No supports"), (1, "1 per post"), (2, "2 per post")):
+                op = row.operator("alugen.panel_supports", text=text,
+                                  depress=(pan.supports == n))
+                op.count = n
+            lay.operator("alugen.panel_update", icon='FILE_REFRESH')
             return
         if p.kind == 'PROFILE':
             col = lay.column(align=True)
@@ -118,6 +156,23 @@ class ALUGEN_PT_parts(_Base, bpy.types.Panel):
         lay.operator("alugen.add_bracket_on_profile", icon='EMPTY_AXIS')
         lay.operator("alugen.add_tnut", icon='MESH_CUBE')
         lay.operator("alugen.add_connector", icon='LINKED')
+        lay.separator()
+        col = lay.column(align=True)
+        s = context.scene.alugen
+        row = col.row(align=True)
+        row.prop(s, "panel_material", text="")
+        row.prop(s, "panel_thickness", text="")
+        col.prop(s, "panel_mode", text="")
+        col.prop(s, "panel_fit", text="")
+        col.prop(s, "panel_level", text="")
+        col.prop(s, "panel_supports")
+        op = lay.operator("alugen.add_panel", icon='MESH_PLANE')
+        op.material = s.panel_material
+        op.mode = s.panel_mode
+        op.fit = s.panel_fit
+        op.level = s.panel_level
+        op.thickness = s.panel_thickness
+        op.supports = s.panel_supports
 
 
 class ALUGEN_PT_frame_edit(_Base, bpy.types.Panel):
@@ -221,8 +276,8 @@ class ALUGEN_PT_bom(_Base, bpy.types.Panel):
 
     def draw(self, context):
         lay = self.layout
-        prof, parts = bom.collect(context)
-        t = bom.totals(prof, parts)
+        prof, panel_rows, parts = bom.collect(context)
+        t = bom.totals(prof, panel_rows, parts)
         box = lay.box().column(align=True)
         box.scale_y = 0.8
         if not prof:
@@ -232,6 +287,14 @@ class ALUGEN_PT_bom(_Base, bpy.types.Panel):
                            % (r['qty'], r['a'], r['b'], bom.slot_label(r['slot']), r['length']))
         if prof:
             box.label(text="Total cut length: %.2f m" % (t['cut_mm'] / 1000.0))
+        if panel_rows:
+            boxp = lay.box().column(align=True)
+            boxp.scale_y = 0.8
+            for r in panel_rows:
+                boxp.label(text="%d x  %.0f x %.0f x %.0f mm%s"
+                                % (r['qty'], r['width'], r['depth'], r['thickness'],
+                                   "  (%d cut-outs)" % r['cutouts'] if r['cutouts'] else ""))
+            boxp.label(text="Panel area: %.3f m2" % t['panel_area'])
         if parts:
             box2 = lay.box().column(align=True)
             box2.scale_y = 0.8

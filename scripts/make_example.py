@@ -26,6 +26,15 @@ s.frame_x, s.frame_y, s.frame_z = 800.0, 600.0, 900.0
 s.frame_levels, s.frame_top, s.frame_bottom = 1, True, True
 s.frame_brackets = s.frame_caps = True
 bpy.ops.alugen.build_frame()
+ctrl = C.active_object
+bpy.ops.alugen.add_panel(material='MDF', mode='INSET', fit='INNER', level='TOP',
+                         supports=1)
+for o in C.selected_objects:
+    o.select_set(False)
+ctrl.select_set(True)
+C.view_layer.objects.active = ctrl
+bpy.ops.alugen.add_panel(material='PLYWOOD', mode='ON_TOP', fit='OUTER', level='MID_1',
+                         supports=0)
 s.length = 400.0
 s.bom_path = "//parts_list.csv"
 

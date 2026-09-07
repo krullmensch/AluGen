@@ -135,3 +135,35 @@ def cube_connector_part(grid, slot):
     label = ("Cube corner connector %gx%g, %s, three-way"
              % (grid, grid, SLOT_SYSTEMS[slot]['label'].lower()))
     return pid, label, grid in (40.0, 80.0)
+
+
+# --------------------------------------------------------------------------
+# Panel materials
+# --------------------------------------------------------------------------
+# key: (label, default thickness in mm, viewport colour)
+PANEL_MATERIALS = {
+    'MDF':       ("MDF", 19.0, (0.62, 0.44, 0.26, 1.0)),
+    'PLYWOOD':   ("Plywood", 18.0, (0.76, 0.58, 0.34, 1.0)),
+    'SOLID':     ("Solid wood", 27.0, (0.55, 0.36, 0.18, 1.0)),
+    'HPL':       ("HPL / laminate", 12.0, (0.20, 0.20, 0.22, 1.0)),
+    'ACRYLIC':   ("Acrylic (PMMA)", 5.0, (0.70, 0.85, 0.90, 0.45)),
+    'POLYCARB':  ("Polycarbonate", 4.0, (0.72, 0.80, 0.78, 0.45)),
+    'ALU_SHEET': ("Aluminium sheet", 3.0, (0.72, 0.73, 0.75, 1.0)),
+    'STEEL_SHEET': ("Steel sheet", 2.0, (0.55, 0.56, 0.60, 1.0)),
+    'OTHER':     ("Other material", 18.0, (0.60, 0.60, 0.60, 1.0)),
+}
+
+
+def panel_material(key):
+    return PANEL_MATERIALS.get(key, PANEL_MATERIALS['OTHER'])
+
+
+def panel_part(material, custom, width, depth, thickness, cutouts=0):
+    """Part id and label for a panel."""
+    name = custom.strip() if (material == 'OTHER' and custom.strip()) else panel_material(material)[0]
+    pid = "PANEL-%s-%gx%gx%g" % (name.upper().replace(" ", "_").replace("/", "-"),
+                                 round(width, 1), round(depth, 1), round(thickness, 1))
+    label = "%s panel %.1f x %.1f x %.1f mm" % (name, width, depth, thickness)
+    if cutouts:
+        label += ", %d cut-out%s" % (cutouts, "s" if cutouts != 1 else "")
+    return pid, label

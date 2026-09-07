@@ -280,8 +280,8 @@ C.scene.alugen.show_gizmos = True
 print("\n=== Parts list ===")
 from alugen import bom  # noqa: E402
 ctrl = make_frame(levels=1)
-pl, pa = bom.collect(C)
-t = bom.totals(pl, pa)
+pl, pan, pa = bom.collect(C)
+t = bom.totals(pl, pan, pa)
 check(t['profile_count'] == 16, "parts list counts 16 profiles (%d)" % t['profile_count'])
 check(all(r['part_id'] for r in pa), "every hardware row has a part id")
 check(not any(o.alugen.is_part for o in bpy.data.objects if o.alugen.kind == 'FRAME'),

@@ -23,6 +23,7 @@ ORIGIN_ITEMS = [('START', "Start", "Origin at the start face"),
                 ('END', "End", "Origin at the end face")]
 
 KIND_ITEMS = [('PROFILE', "Profile", ""),
+              ('PANEL', "Panel", ""),
               ('CAP', "End cap", ""),
               ('BRACKET', "Angle bracket", ""),
               ('TNUT', "T-slot nut", ""),
@@ -72,6 +73,13 @@ def _remount(self, context):
     obj = self.id_data
     if isinstance(obj, bpy.types.Object):
         mounting.remount(obj)
+
+
+def _panel_changed(self, context):
+    if is_busy():
+        return
+    from . import panels
+    panels.update_panel(self.id_data)
 
 
 def _face_changed(side):
@@ -170,6 +178,65 @@ class ALUGEN_PG_frame(bpy.types.PropertyGroup):
     warning: StringProperty(name="Warning", default="")
 
 
+MATERIAL_ITEMS = [(k, v[0], "%s, %.0f mm by default" % (v[0], v[1]))
+                  for k, v in catalog.PANEL_MATERIALS.items()]
+
+PANEL_MODE_ITEMS = [
+    ('ON_TOP', "On top", "Panel lies on top of the profiles at that level"),
+    ('INSET', "Inset", "Panel drops in so its top is flush with the profiles"),
+    ('IN_SLOT', "In the slot", "Panel edges reach into the slots of the surrounding rails"),
+]
+
+PANEL_FIT_ITEMS = [
+    ('OUTER', "Outer footprint", "Cover the whole frame footprint and notch around profiles"),
+    ('INNER', "Between the rails", "Drop inside the surrounding rails"),
+    ('CUSTOM', "Custom size", "Use the width and depth given below"),
+]
+
+PANEL_LEVEL_ITEMS = [('TOP', "Top", ""), ('BOTTOM', "Bottom", "")] + \
+    [('MID_%d' % i, "Level %d" % i, "") for i in range(1, 7)] + \
+    [('CUSTOM', "Custom height", "")]
+
+
+class ALUGEN_PG_panel(bpy.types.PropertyGroup):
+    """A worktop, shelf or cover panel."""
+
+    pid: StringProperty(name="Panel id", default="")
+    material: EnumProperty(name="Material", items=MATERIAL_ITEMS, default='PLYWOOD',
+                           update=_panel_changed)
+    custom_material: StringProperty(name="Material name", default="",
+                                    update=_panel_changed)
+    thickness: FloatProperty(name="Thickness (mm)", default=18.0, min=0.5, max=200.0,
+                             precision=1, update=_panel_changed)
+    width: FloatProperty(name="Width (mm)", default=600.0, min=10.0, max=5000.0,
+                         precision=1, update=_panel_changed)
+    depth: FloatProperty(name="Depth (mm)", default=400.0, min=10.0, max=5000.0,
+                         precision=1, update=_panel_changed)
+    mode: EnumProperty(name="Sits", items=PANEL_MODE_ITEMS, default='ON_TOP',
+                       update=_panel_changed)
+    fit: EnumProperty(name="Size", items=PANEL_FIT_ITEMS, default='OUTER',
+                      update=_panel_changed)
+    level: EnumProperty(name="Level", items=PANEL_LEVEL_ITEMS, default='TOP',
+                        update=_panel_changed)
+    z: FloatProperty(name="Height (mm)", default=0.0, precision=1, update=_panel_changed)
+    clearance: FloatProperty(name="Clearance (mm)", default=0.5, min=0.0, max=20.0,
+                             precision=2, update=_panel_changed,
+                             description="Gap between the panel edge and the profiles")
+    notch: BoolProperty(name="Cut around profiles", default=True, update=_panel_changed,
+                        description="Notch the panel where a profile passes through it")
+    notch_clearance: FloatProperty(name="Cut-out clearance (mm)", default=0.5, min=0.0,
+                                   max=20.0, precision=2, update=_panel_changed)
+    corner_radius: FloatProperty(name="Corner radius (mm)", default=0.0, min=0.0, max=200.0,
+                                 precision=1, update=_panel_changed)
+    slot_engagement: FloatProperty(name="Slot engagement (mm)", default=0.0, min=0.0,
+                                   max=30.0, precision=1, update=_panel_changed,
+                                   description="How deep the panel reaches into the slot; "
+                                               "0 uses the slot depth minus 1 mm")
+    supports: IntProperty(name="Support brackets per post", default=0, min=0, max=2)
+    cutouts: IntProperty(name="Cut-outs", default=0)
+    warning: StringProperty(default="")
+
+
 class ALUGEN_PG_object(bpy.types.PropertyGroup):
     is_part: BoolProperty(name="AluGen part", default=False)
     kind: EnumProperty(name="Type", items=KIND_ITEMS, default='OTHER')
@@ -216,6 +283,10 @@ class ALUGEN_PG_object(bpy.types.PropertyGroup):
     role: StringProperty(name="Frame role", default="")
     role_i: IntProperty(name="Role index", default=0)
     frame: PointerProperty(type=ALUGEN_PG_frame)
+
+    # --- panels ------------------------------------------------------------
+    panel: PointerProperty(type=ALUGEN_PG_panel)
+    support_pid: StringProperty(name="Supports panel", default="")
 
     # --- parts list --------------------------------------------------------
     part_id: StringProperty(name="Part id", default="")
@@ -264,6 +335,14 @@ class ALUGEN_PG_scene(bpy.types.PropertyGroup):
     frame_brackets: BoolProperty(name="Add brackets", default=True)
     frame_caps: BoolProperty(name="Add end caps", default=True)
 
+    # New panel
+    panel_material: EnumProperty(name="Material", items=MATERIAL_ITEMS, default='PLYWOOD')
+    panel_mode: EnumProperty(name="Sits", items=PANEL_MODE_ITEMS, default='ON_TOP')
+    panel_fit: EnumProperty(name="Size", items=PANEL_FIT_ITEMS, default='OUTER')
+    panel_level: EnumProperty(name="Level", items=PANEL_LEVEL_ITEMS, default='TOP')
+    panel_thickness: FloatProperty(name="Thickness (mm)", default=18.0, min=0.5, max=200.0)
+    panel_supports: IntProperty(name="Support brackets per post", default=1, min=0, max=2)
+
     # Viewport
     show_gizmos: BoolProperty(
         name="Show gizmos", default=True,
@@ -277,7 +356,7 @@ class ALUGEN_PG_scene(bpy.types.PropertyGroup):
                              default="//parts_list.csv")
 
 
-CLASSES = (ALUGEN_PG_frame, ALUGEN_PG_object, ALUGEN_PG_scene)
+CLASSES = (ALUGEN_PG_frame, ALUGEN_PG_panel, ALUGEN_PG_object, ALUGEN_PG_scene)
 
 
 def register():

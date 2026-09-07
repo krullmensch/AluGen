@@ -33,6 +33,10 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
   stays editable: move one side and every profile, bracket and cap follows.
 - **Viewport gizmos**: drag a profile to length, slide a bracket along its
   profile, spin it, or pull a whole frame side out, all in the viewport.
+- **Panels**: worktops, shelves and covers in wood, plastic or sheet metal.
+  They take their size and height from the frame, cut themselves around every
+  profile that passes through, and can carry support brackets that follow their
+  underside.
 - **Parts list**: live in the sidebar, exportable as CSV and TXT, grouped by
   profile size and by hardware type.
 - **Validation**: flags cut lengths outside the usable range, scaled objects
@@ -164,6 +168,46 @@ redo panel.
 *Four brackets placed on the posts at 382 mm carry an 18 mm panel flush with
 the post tops. The panel itself is not an AluGen part.*
 
+## Panels of wood, plastic or sheet metal
+
+A panel is a part like any other: it has a material, a thickness, and a row in
+the parts list. What it does not have is a fixed size, because it takes that
+from the frame it belongs to.
+
+![A worktop dropped in flush and a shelf cut around the posts](docs/images/panels.png)
+
+**Where it sits** is one of three choices.
+
+- **On top** puts the panel on the profiles of that level. Anything reaching
+  higher, typically the posts of the frame, is cut out of the panel.
+- **Inset** drops it in so its top is flush with the profiles, and support
+  brackets carry it from below.
+- **In the slot** sizes it so the edges reach into the slots of the surrounding
+  rails and centres it on the slot line. If the panel is thicker than the slot
+  opening, the panel says so.
+
+**Which size** is either the outer footprint of the frame, the clear space
+between the rails, or a size you type in. A clearance, 0.5 mm by default, is
+kept on every edge.
+
+**Cut-outs** are computed from the profiles themselves. Every profile that
+passes through the thickness of the panel and lies inside its outline is cut
+out, with its own clearance around it. Move the frame side, add a level, change
+the panel height, and the cut-outs are recomputed with everything else.
+
+![Top view of the shelf, cut around the four posts](docs/images/panel-notch.png)
+
+**Support brackets** are the answer to an inset panel: one or two per post,
+placed so their upper face meets the underside of the panel. Make the panel
+thicker and they move down with it, so the top stays flush. They are ordinary
+brackets and appear in the parts list as such.
+
+Materials cover MDF, plywood, solid wood, HPL, acrylic, polycarbonate,
+aluminium and steel sheet, each with a sensible default thickness and its own
+colour in the viewport, plus a free text field for anything else. The parts
+list gets its own panel section with material, length, width, thickness and the
+number of cut-outs, and a total panel area.
+
 ## Panels
 
 | Panel | What it does |
@@ -173,6 +217,7 @@ the post tops. The panel itself is not an AluGen part.*
 | Join | Butt against end, perpendicular on face, parallel to face, fit length between |
 | Hardware | End caps, angle brackets at a joint or anywhere on a single profile, T-slot nuts, connectors |
 | Frame | Size, layout and side handles of the selected frame, plus its cut list and warnings |
+| Hardware > panel row | Material, thickness, seat, size and support brackets for a new panel |
 | Frame generator | Full cuboid frame with a cut list preview |
 | Parts list | Live list, CSV and TXT export, clipboard, text block, validation |
 
@@ -215,6 +260,12 @@ ordering is the description in the parts list.
 - Undo after a gizmo drag reverts the drag, but Blender does not always push a
   separate undo step per drag, so check the result rather than assuming a
   one-to-one history.
+- A panel cut-out uses the bounding box of the profile, so a rounded profile
+  corner is cut square. The result always fits, it is just not a contour cut.
+- Panels cut around profiles, not around hardware. A bracket in the way has to
+  be moved by hand.
+- Panel support brackets are placed on the posts of a frame. A panel without a
+  frame carries no supports.
 
 ## Development
 
@@ -234,6 +285,7 @@ suite:
 
 ```
 blender --background --factory-startup --python tests/test_frames.py
+blender --background --factory-startup --python tests/test_panels.py
 ```
 
 Regenerate the documentation images and the example file:
@@ -253,6 +305,7 @@ alugen/          the add-on
   builder.py     object creation, materials, placement
   mounting.py    placing hardware on a profile and keeping it there
   frames.py      editable frames: layout, update, side operators
+  panels.py      panels: fit, height, cut-outs and support brackets
   gizmos.py      viewport handles for profiles, hardware and frames
   operators.py   operators
   assemblies.py  frame generator entry point

@@ -13,14 +13,25 @@ def _profile_key(obj):
 
 
 def collect(context):
-    """Return (profiles, parts) as sorted lists of dicts."""
+    """Return (profiles, panels, parts) as sorted lists of dicts."""
     profiles = {}
+    panels = {}
     parts = {}
     for obj in context.scene.objects:
         p = obj.alugen
         if not p.is_part:
             continue
-        if p.kind == 'PROFILE':
+        if p.kind == 'PANEL':
+            pan = p.panel
+            key = (p.part_id, round(pan.width, 1), round(pan.depth, 1),
+                   round(pan.thickness, 1))
+            row = panels.setdefault(key, dict(part_id=p.part_id, name=p.part_name,
+                                              width=pan.width, depth=pan.depth,
+                                              thickness=pan.thickness,
+                                              cutouts=pan.cutouts, qty=0,
+                                              note=pan.warning))
+            row['qty'] += 1
+        elif p.kind == 'PROFILE':
             key = _profile_key(obj)
             row = profiles.setdefault(key, dict(a=key[0], b=key[1], slot=key[2],
                                                 length=key[3], qty=0))
@@ -32,13 +43,16 @@ def collect(context):
             row['qty'] += 1
 
     prof_list = sorted(profiles.values(), key=lambda r: (r['slot'], r['a'], r['b'], -r['length']))
+    panel_list = sorted(panels.values(), key=lambda r: (-r['width'], -r['depth']))
     part_list = sorted(parts.values(), key=lambda r: (r['kind'], r['part_id'], r['name']))
-    return prof_list, part_list
+    return prof_list, panel_list, part_list
 
 
-def totals(prof_list, part_list):
+def totals(prof_list, panel_list, part_list):
     return dict(cut_mm=sum(r['length'] * r['qty'] for r in prof_list),
                 profile_count=sum(r['qty'] for r in prof_list),
+                panel_count=sum(r['qty'] for r in panel_list),
+                panel_area=sum(r['width'] * r['depth'] * r['qty'] for r in panel_list) / 1e6,
                 part_count=sum(r['qty'] for r in part_list))
 
 
@@ -47,8 +61,8 @@ def slot_label(slot):
 
 
 def as_text(context):
-    prof, parts = collect(context)
-    t = totals(prof, parts)
+    prof, panel_rows, parts = collect(context)
+    t = totals(prof, panel_rows, parts)
     L = []
     L.append("PARTS LIST - AluGen")
     L.append("File: %s" % (bpy.data.filepath or "(unsaved)"))
@@ -64,6 +78,19 @@ def as_text(context):
     L.append("Total cut length: %.0f mm (%.2f m) in %d pieces"
              % (t['cut_mm'], t['cut_mm'] / 1000.0, t['profile_count']))
     L.append("")
+    L.append("PANELS")
+    if not panel_rows:
+        L.append("(none)")
+    for r in panel_rows:
+        L.append("%-4d x %-28s %.1f x %.1f x %.1f mm%s"
+                 % (r['qty'], r['name'].split(" panel")[0], r['width'], r['depth'],
+                    r['thickness'],
+                    ", %d cut-out(s)" % r['cutouts'] if r['cutouts'] else ""))
+        if r['note']:
+            L.append("         Note: %s" % r['note'])
+    if panel_rows:
+        L.append("Panel area: %.3f m2 in %d pieces" % (t['panel_area'], t['panel_count']))
+    L.append("")
     L.append("HARDWARE")
     if not parts:
         L.append("(none)")
@@ -77,13 +104,17 @@ def as_text(context):
 
 
 def as_csv(context):
-    prof, parts = collect(context)
-    t = totals(prof, parts)
+    prof, panel_rows, parts = collect(context)
+    t = totals(prof, panel_rows, parts)
     rows = ["Group,Qty,A (mm),B (mm),Slot,Length (mm),Part id,Description,Note"]
     for r in prof:
         rows.append("Profile,%d,%g,%g,%s,%.1f,,\"%s\"," %
                     (r['qty'], r['a'], r['b'], slot_label(r['slot']), r['length'],
                      "Extrusion I-type %s" % catalog.MATERIAL))
+    for r in panel_rows:
+        rows.append("Panel,%d,%.1f,%.1f,%.1f mm thick,,%s,\"%s\",\"%s\"" %
+                    (r['qty'], r['width'], r['depth'], r['thickness'], r['part_id'],
+                     r['name'].replace('"', "'"), r['note'].replace('"', "'")))
     for r in parts:
         rows.append("Hardware,%d,,,,,%s,\"%s\",\"%s\"" %
                     (r['qty'], r['part_id'], r['name'].replace('"', "'"),
@@ -120,6 +151,12 @@ def check_scene(context):
                               % (obj.name, a, b))
             if abs(p.length - round(p.length, 1)) > 1e-6:
                 issues.append("%s: length %.4f mm, round it to 0.1 mm" % (obj.name, p.length))
+        elif p.kind == 'PANEL':
+            pan = p.panel
+            if pan.thickness <= 0.0:
+                issues.append("%s: panel thickness is not set" % obj.name)
+            if pan.warning:
+                issues.append("%s: %s" % (obj.name, pan.warning))
         elif p.note:
             issues.append("%s: %s" % (obj.name, p.note))
     return issues
