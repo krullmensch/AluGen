@@ -50,7 +50,11 @@ def render(name, ortho, loc, rot, res, flat=False):
     sh.show_object_outline = True
     C.scene.display.render_aa = '16'
     for o in C.scene.objects:
-        if o.alugen.kind == 'BRACKET':
+        if o.alugen.kind == 'PANEL':
+            _lbl, _t, col = __import__("alugen.catalog", fromlist=["catalog"]).panel_material(
+                o.alugen.panel.material)
+            o.color = col
+        elif o.alugen.kind == 'BRACKET':
             o.color = (0.85, 0.55, 0.15, 1)
         elif o.alugen.kind == 'CAP':
             o.color = (0.09, 0.09, 0.10, 1)
@@ -141,5 +145,36 @@ for i, sp in enumerate((0.0, 90.0, 180.0, 270.0)):
     bpy.ops.alugen.add_bracket_on_profile(offset=60.0 + i * 100.0, rotation=0.0, spin=sp)
 render("bracket-spin.png", 0.55, (0.63, -0.43, 0.46),
        (math.radians(72), 0, math.radians(56)), (900, 1000))
+
+
+# 6) panels: a worktop dropped in flush and a shelf notched around the posts
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+s.a, s.b, s.slot = '40', '40', 'N8'
+s.frame_x, s.frame_y, s.frame_z = 700.0, 450.0, 720.0
+s.frame_levels, s.frame_top, s.frame_bottom = 1, True, True
+s.frame_brackets = s.frame_caps = True
+bpy.ops.alugen.build_frame()
+ctrl = C.active_object
+bpy.ops.alugen.add_panel(material='MDF', mode='INSET', fit='INNER', level='TOP',
+                         supports=1)
+for o in C.selected_objects:
+    o.select_set(False)
+ctrl.select_set(True)
+C.view_layer.objects.active = ctrl
+bpy.ops.alugen.add_panel(material='PLYWOOD', mode='ON_TOP', fit='OUTER', level='MID_1',
+                         supports=0)
+for o in C.selected_objects:
+    o.select_set(False)
+render("panels.png", 1.35, (1.25, -1.42, 1.30),
+       (math.radians(60), 0, math.radians(41)), (1200, 900))
+
+# 7) top view of the shelf, cut around the four posts
+for o in C.scene.objects:
+    if o.alugen.kind == 'PANEL' and o.alugen.panel.mode == 'INSET':
+        o.hide_render = True
+render("panel-notch.png", 0.78, (0.0, 0.0, 1.2), (0.0, 0.0, 0.0), (1100, 760))
+for o in C.scene.objects:
+    o.hide_render = False
 
 print("IMAGES DONE")

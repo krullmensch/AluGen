@@ -274,7 +274,7 @@ check(worst > -1e-4, "no free bracket vertex sits inside the profile hull "
                      "(closest %.4f mm)" % worst)
 check(abs(worst) < 1e-4, "brackets sit flush on the surface (gap %.4f mm)" % worst)
 
-_pl, _pa = bom.collect(C)
+_pl, _pan, _pa = bom.collect(C)
 check(any(r["part_id"] == "BRACKET-N8-40" and r["qty"] == 11 for r in _pa),
             "parts list counts all 11 free brackets")
 
@@ -321,8 +321,8 @@ prof_pen = sum(1 for i, p in enumerate(profs) for q in profs[i + 1:]
 check(prof_pen == 0, "no profile intersects another profile")
 
 print("\n=== Parts list ===")
-pl, pa = bom.collect(C)
-t = bom.totals(pl, pa)
+pl, pan, pa = bom.collect(C)
+t = bom.totals(pl, pan, pa)
 print(bom.as_text(C))
 check(t['profile_count'] == 16, "parts list counts 16 profiles")
 check(t['part_count'] == 32, "parts list counts 32 hardware items")

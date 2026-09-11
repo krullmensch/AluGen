@@ -103,17 +103,53 @@ def create_profile(context, a, b, slot, length, axis='X', origin='START',
     p.origin_mode = origin
     p.corner_cavity = corner_cavity
 
+    obj["alugen_section"] = section_signature(p)
     obj.matrix_world = Matrix.Translation(Vector(location)) @ AXIS_MATRIX[axis]
     return obj
 
 
-def rebuild_profile(obj):
+def section_signature(p):
+    """Everything that changes the cross-section, but not the length."""
+    return "%s|%s|%s|%d|%d|%d|%s" % (p.a, p.b, p.slot, int(p.corner_cavity),
+                                     p.arc_segs, p.bore_segs, p.origin_mode)
+
+
+def span_z(p):
+    """Local start and end of the extrusion in millimetres."""
+    if p.origin_mode == 'CENTER':
+        return -p.length * 0.5, p.length * 0.5
+    if p.origin_mode == 'END':
+        return -p.length, 0.0
+    return 0.0, p.length
+
+
+def rebuild_profile(obj, allow_fast=True):
+    """Regenerate the profile mesh.
+
+    When only the length changed, the cross-section is reused and just the two
+    end caps are moved. That keeps dragging a length or a frame side smooth.
+    """
     p = obj.alugen
     a, b = float(p.a), float(p.b)
-    verts, faces = geometry.profile_mesh(
-        a, b, p.slot, p.length, p.origin_mode, p.corner_cavity,
-        p.arc_segs, p.bore_segs)
-    geometry.write_mesh(obj.data, verts, faces)
+    sig = section_signature(p)
+    me = obj.data
+    z0, z1 = span_z(p)
+    n = len(me.vertices)
+    if (allow_fast and n and n % 2 == 0 and obj.get("alugen_section") == sig):
+        half = n // 2
+        co = [0.0] * (n * 3)
+        me.vertices.foreach_get("co", co)
+        for i in range(half):
+            co[i * 3 + 2] = z0 * MM
+            co[(half + i) * 3 + 2] = z1 * MM
+        me.vertices.foreach_set("co", co)
+        me.update()
+    else:
+        verts, faces = geometry.profile_mesh(
+            a, b, p.slot, p.length, p.origin_mode, p.corner_cavity,
+            p.arc_segs, p.bore_segs)
+        geometry.write_mesh(me, verts, faces)
+        obj["alugen_section"] = sig
     obj.name = profile_name(a, b, p.slot, p.length)
     obj.data.name = obj.name
     for child in obj.children:

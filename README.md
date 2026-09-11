@@ -29,7 +29,14 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
   for panels, plates, feet, rails or anything else that is not another
   extrusion. It still lands in the parts list.
 - **Frame generator**: enter outer width, depth and height, get four posts,
-  the rails, the brackets and the caps with the correct cut lengths.
+  the rails, the brackets and the caps with the correct cut lengths. The frame
+  stays editable: move one side and every profile, bracket and cap follows.
+- **Viewport gizmos**: drag a profile to length, slide a bracket along its
+  profile, spin it, or pull a whole frame side out, all in the viewport.
+- **Panels**: worktops, shelves and covers in wood, plastic or sheet metal.
+  They take their size and height from the frame, cut themselves around every
+  profile that passes through, and can carry support brackets that follow their
+  underside.
 - **Parts list**: live in the sidebar, exportable as CSV and TXT, grouped by
   profile size and by hardware type.
 - **Validation**: flags cut lengths outside the usable range, scaled objects
@@ -41,8 +48,8 @@ Tested with Blender 5.2 LTS, runs on Blender 4.2 and newer.
 
 ## Installation
 
-1. Download `alugen-1.2.0.zip` from the releases page, or build it yourself
-   with `./scripts/build_zip.sh`.
+1. Download the latest `alugen-x.y.z.zip` from the releases page, or build it
+   yourself with `./scripts/build_zip.sh`.
 2. In Blender open `Preferences > Add-ons`, use the dropdown in the top right
    and choose `Install from Disk...`, then pick the zip.
 3. Enable the entry named **AluGen**.
@@ -85,6 +92,48 @@ every run.
 
 ![Joint detail](docs/images/joint-detail.png)
 
+## Visual editing
+
+Click a part and drag its handles. Nothing has to be typed unless you want an
+exact number, and every handle writes the same properties the panel shows, so
+the two always agree.
+
+![Frame side handles and the AluGen sidebar](docs/images/gizmos.png)
+
+**A single profile** gets a length handle at its start, pointing along its
+axis. Dragging the tip sets the cut length; the mesh is rebuilt by moving the
+end faces only, so it stays responsive.
+
+**A frame** gets one arrow per side, on the controller and on every member, so
+clicking any rail is enough to grab the frame. Dragging an arrow moves that
+side only, the opposite side stays where it is. Everything adapts:
+
+- posts move and, for the Z sides, change length
+- X and Y rails get their new cut length, `X - 2 * A` and `Y - 2 * B`
+- the corner brackets follow the rail ends
+- end caps stay on the post ends
+- hardware you mounted yourself is re-fitted, see below
+
+If a rail becomes too short for a bracket, the bracket is removed and the frame
+reports it. If a rail drops below the minimum cut length it is removed too.
+Shrinking further than the profiles themselves is blocked at the point where
+the posts touch.
+
+**Mounted hardware** gets three handles: an arrow along the host profile for
+the offset, an orange dial for the spin, and a green dial for the rotation
+around the profile. A part that would slide off its host is pulled back onto
+it and says so in the panel; a part that cannot fit at all, because the profile
+is now shorter than the part itself, is flagged instead of being moved.
+
+The `Frame` panel carries the same values as numbers: width, depth and height,
+plus a row of buttons that move a single side in 10 mm steps. Handles can be
+switched off entirely under `Show gizmos`.
+
+A note on frames: their profiles are generated, so their length and position
+are owned by the frame. Editing those by hand is overwritten on the next frame
+update. Parts you add yourself are yours and are only re-fitted, never
+replaced.
+
 ## Brackets that carry something other than a profile
 
 `Add bracket on profile` mounts a bracket on the active profile alone, so you
@@ -119,6 +168,55 @@ redo panel.
 *Four brackets placed on the posts at 382 mm carry an 18 mm panel flush with
 the post tops. The panel itself is not an AluGen part.*
 
+## Panels of wood, plastic or sheet metal
+
+A panel is a part like any other: it has a material, a thickness, and a row in
+the parts list. What it does not have is a fixed size, because it takes that
+from the frame it belongs to.
+
+![A worktop dropped in flush and a shelf cut around the posts](docs/images/panels.png)
+
+**Where it sits** is one of three choices.
+
+- **On top** puts the panel on the profiles of that level. Anything reaching
+  higher, typically the posts of the frame, is cut out of the panel.
+- **Inset** drops it in so its top is flush with the profiles, and support
+  brackets carry it from below.
+- **In the slot** sizes it so the edges reach into the slots of the surrounding
+  rails and centres it on the slot line. If the panel is thicker than the slot
+  opening, the panel says so.
+
+**Which size** is either the outer footprint of the frame, the clear space
+between the rails, or a size you type in. A clearance, 0.5 mm by default, is
+kept on every edge.
+
+**Cut-outs** are computed from the profiles themselves. Every profile that
+passes through the thickness of the panel and lies inside its outline is cut
+out, with its own clearance around it. Move the frame side, add a level, change
+the panel height, and the cut-outs are recomputed with everything else.
+
+![Top view of the shelf, cut around the four posts](docs/images/panel-notch.png)
+
+**Brackets in the way** are moved, not left inside the panel. When a panel is
+added or changed, every corner bracket of the frame is checked against it. One
+that would end up in the material is flipped to the other side of its rail, and
+if there is no room there either it is removed and the frame says so. A bracket
+you placed by hand is turned to the opposite face of its profile instead, and if
+that does not help it is reported and left alone, because deleting your work is
+not the add-on's call. The whole check can be switched off per frame with
+`Keep brackets clear of panels`.
+
+**Support brackets** are the answer to an inset panel: one or two per post,
+placed so their upper face meets the underside of the panel. Make the panel
+thicker and they move down with it, so the top stays flush. They are ordinary
+brackets and appear in the parts list as such.
+
+Materials cover MDF, plywood, solid wood, HPL, acrylic, polycarbonate,
+aluminium and steel sheet, each with a sensible default thickness and its own
+colour in the viewport, plus a free text field for anything else. The parts
+list gets its own panel section with material, length, width, thickness and the
+number of cut-outs, and a total panel area.
+
 ## Panels
 
 | Panel | What it does |
@@ -127,6 +225,8 @@ the post tops. The panel itself is not an AluGen part.*
 | Edit selection | Change the dimensions of the selected profile, mesh rebuilds live |
 | Join | Butt against end, perpendicular on face, parallel to face, fit length between |
 | Hardware | End caps, angle brackets at a joint or anywhere on a single profile, T-slot nuts, connectors |
+| Frame | Size, layout and side handles of the selected frame, plus its cut list and warnings |
+| Hardware > panel row | Material, thickness, seat, size and support brackets for a new panel |
 | Frame generator | Full cuboid frame with a cut list preview |
 | Parts list | Live list, CSV and TXT export, clipboard, text block, validation |
 
@@ -166,6 +266,16 @@ ordering is the description in the parts list.
 - Fasteners are not simulated, and there is no collision or load check.
 - Do not scale objects. Change the `Length` field instead. The validation
   reports scaled objects because their dimensions no longer match the model.
+- Undo after a gizmo drag reverts the drag, but Blender does not always push a
+  separate undo step per drag, so check the result rather than assuming a
+  one-to-one history.
+- A panel cut-out uses the bounding box of the profile, so a rounded profile
+  corner is cut square. The result always fits, it is just not a contour cut.
+- Panels cut around profiles, not around hardware. Brackets are moved out of
+  the way instead of being cut around, and hardware other than brackets is only
+  reported.
+- Panel support brackets are placed on the posts of a frame. A panel without a
+  frame carries no supports.
 
 ## Development
 
@@ -179,6 +289,14 @@ It checks that every cross-section is free of self-intersections, that the
 generated meshes are watertight with outward normals, that outer dimensions and
 cut lengths are exact, that brackets touch two profiles without intersecting
 them, and that the operators and the parts list export behave.
+
+The editable frame, the mounted hardware and the gizmo targets have their own
+suite:
+
+```
+blender --background --factory-startup --python tests/test_frames.py
+blender --background --factory-startup --python tests/test_panels.py
+```
 
 Regenerate the documentation images and the example file:
 
@@ -195,8 +313,12 @@ alugen/          the add-on
   geometry.py    cross-section, extrusion, hardware meshes
   props.py       property groups on object and scene
   builder.py     object creation, materials, placement
+  mounting.py    placing hardware on a profile and keeping it there
+  frames.py      editable frames: layout, update, side operators
+  panels.py      panels: fit, height, cut-outs and support brackets
+  gizmos.py      viewport handles for profiles, hardware and frames
   operators.py   operators
-  assemblies.py  frame generator
+  assemblies.py  frame generator entry point
   bom.py         parts list and validation
   ui.py          sidebar panels
 docs/images/     rendered documentation images

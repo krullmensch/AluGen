@@ -6,6 +6,8 @@ from bpy.props import (BoolProperty, EnumProperty, FloatProperty, IntProperty,
 
 from . import catalog
 
+MM = 0.001
+
 SIZE_ITEMS = [(str(int(s)), "%d mm" % int(s), "Edge size %d mm" % int(s))
               for s in catalog.SIZES]
 
@@ -21,19 +23,223 @@ ORIGIN_ITEMS = [('START', "Start", "Origin at the start face"),
                 ('END', "End", "Origin at the end face")]
 
 KIND_ITEMS = [('PROFILE', "Profile", ""),
+              ('PANEL', "Panel", ""),
               ('CAP', "End cap", ""),
               ('BRACKET', "Angle bracket", ""),
               ('TNUT', "T-slot nut", ""),
               ('SCREW', "Screw", ""),
               ('CONNECTOR', "Connector", ""),
+              ('FRAME', "Frame", ""),
               ('OTHER', "Other", "")]
+
+GRID_ITEMS = [('AUTO', "Automatic", "Use the profile grid")] + \
+             [(str(int(s)), "%d" % int(s), "") for s in catalog.SIZES]
+
+# Guard against re-entrant property updates while geometry is being rebuilt
+_BUSY = [False]
+
+
+class busy:
+    """Context manager that suppresses property update callbacks."""
+
+    def __enter__(self):
+        self.prev = _BUSY[0]
+        _BUSY[0] = True
+        return self
+
+    def __exit__(self, *exc):
+        _BUSY[0] = self.prev
+        return False
+
+
+def is_busy():
+    return _BUSY[0]
 
 
 def _rebuild(self, context):
-    from . import builder
+    if is_busy():
+        return
+    from . import builder, mounting
     obj = self.id_data
     if isinstance(obj, bpy.types.Object) and obj.alugen.kind == 'PROFILE':
         builder.rebuild_profile(obj)
+        mounting.refit_children(obj)
+
+
+def _remount(self, context):
+    if is_busy():
+        return
+    from . import mounting
+    obj = self.id_data
+    if isinstance(obj, bpy.types.Object):
+        mounting.remount(obj)
+
+
+def _panel_changed(self, context):
+    if is_busy():
+        return
+    from . import panels
+    panels.update_panel(self.id_data)
+
+
+def _face_changed(side):
+    def fn(self, context):
+        if is_busy():
+            return
+        from . import frames
+        frames.face_changed(self.id_data, side)
+    return fn
+
+
+def _frame_layout_changed(self, context):
+    if is_busy():
+        return
+    from . import frames
+    frames.update_frame(self.id_data, rebuild_members=True)
+
+
+def _mm_mirror(attr, doc):
+    """Float property in millimetres backed by a stored metre value."""
+    def get(self):
+        return getattr(self, attr) / MM
+
+    def set(self, value):
+        setattr(self, attr, value * MM)
+
+    return FloatProperty(name=doc, get=get, set=set, precision=1)
+
+
+class ALUGEN_PG_frame(bpy.types.PropertyGroup):
+    """Parameters of a generated frame, stored on its controller object.
+
+    The frame is described as a box in the controller's local space, so a face
+    can be dragged without moving the opposite one.
+    """
+
+    fid: StringProperty(name="Frame id", default="")
+
+    x_min: FloatProperty(name="X min", unit='LENGTH', default=-0.3,
+                         update=_face_changed('x_min'))
+    x_max: FloatProperty(name="X max", unit='LENGTH', default=0.3,
+                         update=_face_changed('x_max'))
+    y_min: FloatProperty(name="Y min", unit='LENGTH', default=-0.2,
+                         update=_face_changed('y_min'))
+    y_max: FloatProperty(name="Y max", unit='LENGTH', default=0.2,
+                         update=_face_changed('y_max'))
+    z_min: FloatProperty(name="Z min", unit='LENGTH', default=0.0,
+                         update=_face_changed('z_min'))
+    z_max: FloatProperty(name="Z max", unit='LENGTH', default=0.8,
+                         update=_face_changed('z_max'))
+
+    a: EnumProperty(name="A", items=SIZE_ITEMS, default='40',
+                    update=_frame_layout_changed)
+    b: EnumProperty(name="B", items=SIZE_ITEMS, default='40',
+                    update=_frame_layout_changed)
+    slot: EnumProperty(name="Slot", items=SLOT_ITEMS, default='N8',
+                       update=_frame_layout_changed)
+    levels: IntProperty(name="Intermediate levels", default=0, min=0, max=6,
+                        update=_frame_layout_changed)
+    top: BoolProperty(name="Top frame", default=True, update=_frame_layout_changed)
+    bottom: BoolProperty(name="Bottom frame", default=True, update=_frame_layout_changed)
+    brackets: BoolProperty(name="Brackets", default=True, update=_frame_layout_changed)
+    caps: BoolProperty(name="End caps", default=True, update=_frame_layout_changed)
+    corner_cavity: BoolProperty(name="Corner cavities", default=False,
+                                update=_frame_layout_changed)
+    bracket_avoid_panels: BoolProperty(
+        name="Keep brackets clear of panels", default=True,
+        update=_frame_layout_changed,
+        description="Move a corner bracket to the other side of its rail when a panel "
+                    "would run into it, and drop it if there is no room either way")
+
+    def _size(axis):
+        def get(self):
+            return (getattr(self, axis + "_max") - getattr(self, axis + "_min")) / MM
+
+        def set(self, value):
+            # Typing a size keeps the minimum face where it is
+            setattr(self, axis + "_max", getattr(self, axis + "_min") + value * MM)
+
+        return FloatProperty(name="Size %s (mm)" % axis.upper(), get=get, set=set,
+                             precision=1)
+
+    size_x: _size('x')
+    size_y: _size('y')
+    size_z: _size('z')
+
+    # Mirrors so an arrow gizmo pointing outwards always grows the frame
+    def _neg(attr):
+        def get(self):
+            return -getattr(self, attr)
+
+        def set(self, value):
+            setattr(self, attr, -value)
+
+        return FloatProperty(name="-" + attr, unit='LENGTH', get=get, set=set)
+
+    x_min_neg: _neg('x_min')
+    y_min_neg: _neg('y_min')
+    z_min_neg: _neg('z_min')
+
+    warning: StringProperty(name="Warning", default="")
+
+
+MATERIAL_ITEMS = [(k, v[0], "%s, %.0f mm by default" % (v[0], v[1]))
+                  for k, v in catalog.PANEL_MATERIALS.items()]
+
+PANEL_MODE_ITEMS = [
+    ('ON_TOP', "On top", "Panel lies on top of the profiles at that level"),
+    ('INSET', "Inset", "Panel drops in so its top is flush with the profiles"),
+    ('IN_SLOT', "In the slot", "Panel edges reach into the slots of the surrounding rails"),
+]
+
+PANEL_FIT_ITEMS = [
+    ('OUTER', "Outer footprint", "Cover the whole frame footprint and notch around profiles"),
+    ('INNER', "Between the rails", "Drop inside the surrounding rails"),
+    ('CUSTOM', "Custom size", "Use the width and depth given below"),
+]
+
+PANEL_LEVEL_ITEMS = [('TOP', "Top", ""), ('BOTTOM', "Bottom", "")] + \
+    [('MID_%d' % i, "Level %d" % i, "") for i in range(1, 7)] + \
+    [('CUSTOM', "Custom height", "")]
+
+
+class ALUGEN_PG_panel(bpy.types.PropertyGroup):
+    """A worktop, shelf or cover panel."""
+
+    pid: StringProperty(name="Panel id", default="")
+    material: EnumProperty(name="Material", items=MATERIAL_ITEMS, default='PLYWOOD',
+                           update=_panel_changed)
+    custom_material: StringProperty(name="Material name", default="",
+                                    update=_panel_changed)
+    thickness: FloatProperty(name="Thickness (mm)", default=18.0, min=0.5, max=200.0,
+                             precision=1, update=_panel_changed)
+    width: FloatProperty(name="Width (mm)", default=600.0, min=10.0, max=5000.0,
+                         precision=1, update=_panel_changed)
+    depth: FloatProperty(name="Depth (mm)", default=400.0, min=10.0, max=5000.0,
+                         precision=1, update=_panel_changed)
+    mode: EnumProperty(name="Sits", items=PANEL_MODE_ITEMS, default='ON_TOP',
+                       update=_panel_changed)
+    fit: EnumProperty(name="Size", items=PANEL_FIT_ITEMS, default='OUTER',
+                      update=_panel_changed)
+    level: EnumProperty(name="Level", items=PANEL_LEVEL_ITEMS, default='TOP',
+                        update=_panel_changed)
+    z: FloatProperty(name="Height (mm)", default=0.0, precision=1, update=_panel_changed)
+    clearance: FloatProperty(name="Clearance (mm)", default=0.5, min=0.0, max=20.0,
+                             precision=2, update=_panel_changed,
+                             description="Gap between the panel edge and the profiles")
+    notch: BoolProperty(name="Cut around profiles", default=True, update=_panel_changed,
+                        description="Notch the panel where a profile passes through it")
+    notch_clearance: FloatProperty(name="Cut-out clearance (mm)", default=0.5, min=0.0,
+                                   max=20.0, precision=2, update=_panel_changed)
+    corner_radius: FloatProperty(name="Corner radius (mm)", default=0.0, min=0.0, max=200.0,
+                                 precision=1, update=_panel_changed)
+    slot_engagement: FloatProperty(name="Slot engagement (mm)", default=0.0, min=0.0,
+                                   max=30.0, precision=1, update=_panel_changed,
+                                   description="How deep the panel reaches into the slot; "
+                                               "0 uses the slot depth minus 1 mm")
+    supports: IntProperty(name="Support brackets per post", default=0, min=0, max=2)
+    cutouts: IntProperty(name="Cut-outs", default=0)
+    warning: StringProperty(default="")
 
 
 class ALUGEN_PG_object(bpy.types.PropertyGroup):
@@ -59,10 +265,57 @@ class ALUGEN_PG_object(bpy.types.PropertyGroup):
     attach_end: EnumProperty(
         name="End", items=[('START', "Start", ""), ('END', "End", "")], default='END')
 
-    # Parts list data
+    # --- hardware mounted on a single profile -----------------------------
+    has_mount: BoolProperty(default=False)
+    mount_offset: FloatProperty(
+        name="Offset (mm)", description="Position along the host profile",
+        default=0.0, precision=1, update=_remount)
+    mount_rotation: FloatProperty(
+        name="Around profile", description="Rotation around the host profile axis",
+        default=0.0, subtype='ANGLE', update=_remount)
+    mount_spin: FloatProperty(
+        name="Spin", description="Rotation of the part on the mounting face",
+        default=0.0, subtype='ANGLE', update=_remount)
+    mount_lateral: FloatProperty(
+        name="Lateral (mm)", description="Shift across the mounting face",
+        default=0.0, precision=1, update=_remount)
+    mount_snap_faces: BoolProperty(name="Snap to faces", default=True, update=_remount)
+    mount_snap_spin: BoolProperty(name="Snap spin to 90 deg", default=True, update=_remount)
+    mount_grid: EnumProperty(name="Bracket size", items=GRID_ITEMS, default='AUTO')
+
+    # --- frame membership --------------------------------------------------
+    fid: StringProperty(name="Frame id", default="")
+    role: StringProperty(name="Frame role", default="")
+    role_i: IntProperty(name="Role index", default=0)
+    frame: PointerProperty(type=ALUGEN_PG_frame)
+
+    # --- panels ------------------------------------------------------------
+    panel: PointerProperty(type=ALUGEN_PG_panel)
+    support_pid: StringProperty(name="Supports panel", default="")
+
+    # --- parts list --------------------------------------------------------
     part_id: StringProperty(name="Part id", default="")
     part_name: StringProperty(name="Description", default="")
     note: StringProperty(name="Note", default="")
+
+    # Gizmo target: cut length expressed in Blender units
+    def _len_bu_get(self):
+        return self.length * MM
+
+    def _len_bu_set(self, value):
+        self.length = max(catalog.LEN_MIN, min(catalog.LEN_MAX, value / MM))
+
+    length_bu: FloatProperty(name="Length", unit='LENGTH',
+                             get=_len_bu_get, set=_len_bu_set)
+
+    def _off_bu_get(self):
+        return self.mount_offset * MM
+
+    def _off_bu_set(self, value):
+        self.mount_offset = value / MM
+
+    mount_offset_bu: FloatProperty(name="Offset", unit='LENGTH',
+                                   get=_off_bu_get, set=_off_bu_set)
 
 
 class ALUGEN_PG_scene(bpy.types.PropertyGroup):
@@ -87,12 +340,28 @@ class ALUGEN_PG_scene(bpy.types.PropertyGroup):
     frame_brackets: BoolProperty(name="Add brackets", default=True)
     frame_caps: BoolProperty(name="Add end caps", default=True)
 
+    # New panel
+    panel_material: EnumProperty(name="Material", items=MATERIAL_ITEMS, default='PLYWOOD')
+    panel_mode: EnumProperty(name="Sits", items=PANEL_MODE_ITEMS, default='ON_TOP')
+    panel_fit: EnumProperty(name="Size", items=PANEL_FIT_ITEMS, default='OUTER')
+    panel_level: EnumProperty(name="Level", items=PANEL_LEVEL_ITEMS, default='TOP')
+    panel_thickness: FloatProperty(name="Thickness (mm)", default=18.0, min=0.5, max=200.0)
+    panel_supports: IntProperty(name="Support brackets per post", default=1, min=0, max=2)
+
+    # Viewport
+    show_gizmos: BoolProperty(
+        name="Show gizmos", default=True,
+        description="Draw drag handles on the selected profile, part or frame")
+    gizmo_hardware: BoolProperty(
+        name="Hardware handles", default=True,
+        description="Draw the offset arrow and the rotation dials on mounted hardware")
+
     # Parts list
     bom_path: StringProperty(name="File", subtype='FILE_PATH',
                              default="//parts_list.csv")
 
 
-CLASSES = (ALUGEN_PG_object, ALUGEN_PG_scene)
+CLASSES = (ALUGEN_PG_frame, ALUGEN_PG_panel, ALUGEN_PG_object, ALUGEN_PG_scene)
 
 
 def register():

@@ -263,25 +263,36 @@ def _triangulate(loops):
 def extrude_section(loops, z0, z1):
     """Closed solid built from 2D contours between z0 and z1.
 
-    loops[0] is the outer contour (CCW), the rest are holes (CW).
+    loops[0] is the outer contour, the rest are holes. Side walls are built from
+    the boundary of the triangulated region rather than from the input loops, so
+    a hole that reaches the outer contour (a notch in a panel, for example)
+    produces one wall and not two.
     Returns (verts, faces) in millimetres.
     """
     pts, tris = _triangulate(loops)
-    n = len(pts)
-    verts = [(p[0], p[1], z0) for p in pts] + [(p[0], p[1], z1) for p in pts]
+
+    # Directed edges; an edge without a partner in the opposite direction is on
+    # the boundary of the region.
+    directed = set()
+    for t in tris:
+        for i in range(3):
+            directed.add((t[i], t[(i + 1) % 3]))
+    boundary = [(a, b) for (a, b) in directed if (b, a) not in directed]
+
+    used = sorted({i for t in tris for i in t})
+    remap = {old: new for new, old in enumerate(used)}
+    n = len(used)
+    verts = [(pts[i][0], pts[i][1], z0) for i in used] + \
+            [(pts[i][0], pts[i][1], z1) for i in used]
+
     faces = []
     for t in tris:
-        faces.append([t[2], t[1], t[0]])                  # bottom cap, normal -Z
-        faces.append([t[0] + n, t[1] + n, t[2] + n])      # top cap, normal +Z
-
-    offset = 0
-    for lp in loops:
-        m = len(lp)
-        for i in range(m):
-            j = (i + 1) % m
-            ia, ib = offset + i, offset + j
-            faces.append([ia, ib, ib + n, ia + n])
-        offset += m
+        a, b, c = remap[t[0]], remap[t[1]], remap[t[2]]
+        faces.append([c, b, a])                    # bottom cap, normal -Z
+        faces.append([a + n, b + n, c + n])        # top cap, normal +Z
+    for a, b in boundary:
+        ia, ib = remap[a], remap[b]
+        faces.append([ia, ib, ib + n, ia + n])     # wall, normal outwards
     return verts, faces
 
 
@@ -509,3 +520,112 @@ def cube_connector_mesh(grid):
     parts.append(box(plen, peg, peg, (s * 0.5 + plen * 0.5, 0.0, 0.0)))
     parts.append(box(peg, plen, peg, (0.0, s * 0.5 + plen * 0.5, 0.0)))
     return merge(parts)
+
+
+# ==========================================================================
+# 2D polygon helpers, used for panel outlines and their cut-outs
+# ==========================================================================
+
+def signed_area(poly):
+    a = 0.0
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        a += x1 * y2 - x2 * y1
+    return a * 0.5
+
+
+def orient(poly, ccw=True):
+    return poly if (signed_area(poly) > 0.0) == ccw else list(reversed(poly))
+
+
+def convex_hull(points):
+    """Monotone chain hull; returns the points counter-clockwise."""
+    pts = sorted(set((round(p[0], 6), round(p[1], 6)) for p in points))
+    if len(pts) < 3:
+        return pts
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def offset_convex(poly, distance):
+    """Grow a convex polygon outwards by distance, mitring the corners."""
+    if distance <= 1e-9 or len(poly) < 3:
+        return list(poly)
+    poly = orient(poly, ccw=True)
+    n = len(poly)
+    lines = []
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1e-12:
+            continue
+        # outward normal of a counter-clockwise polygon
+        nx, ny = dy / length, -dx / length
+        lines.append(((x1 + nx * distance, y1 + ny * distance),
+                      (x2 + nx * distance, y2 + ny * distance)))
+    out = []
+    m = len(lines)
+    for i in range(m):
+        p1, p2 = lines[i]
+        p3, p4 = lines[(i + 1) % m]
+        d1 = (p2[0] - p1[0], p2[1] - p1[1])
+        d2 = (p4[0] - p3[0], p4[1] - p3[1])
+        den = d1[0] * d2[1] - d1[1] * d2[0]
+        if abs(den) < 1e-12:
+            out.append(p2)
+            continue
+        t = ((p3[0] - p1[0]) * d2[1] - (p3[1] - p1[1]) * d2[0]) / den
+        out.append((p1[0] + d1[0] * t, p1[1] + d1[1] * t))
+    return out
+
+
+def clip_to_convex(poly, clip):
+    """Sutherland-Hodgman: cut poly down to the convex region clip."""
+    clip = orient(clip, ccw=True)
+    out = list(poly)
+    n = len(clip)
+    for i in range(n):
+        if not out:
+            return []
+        a = clip[i]
+        b = clip[(i + 1) % n]
+        ex, ey = b[0] - a[0], b[1] - a[1]
+
+        def inside(p):
+            return ex * (p[1] - a[1]) - ey * (p[0] - a[0]) >= -1e-12
+
+        result = []
+        for j, cur in enumerate(out):
+            prev = out[j - 1]
+            cur_in, prev_in = inside(cur), inside(prev)
+            if cur_in != prev_in:
+                dx, dy = cur[0] - prev[0], cur[1] - prev[1]
+                den = ex * dy - ey * dx
+                if abs(den) > 1e-12:
+                    t = (ex * (prev[1] - a[1]) - ey * (prev[0] - a[0])) / -den
+                    result.append((prev[0] + dx * t, prev[1] + dy * t))
+            if cur_in:
+                result.append(cur)
+        out = result
+    return _dedup(out)
+
+
+def polygon_area(poly):
+    return abs(signed_area(poly))
